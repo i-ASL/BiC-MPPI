@@ -1,6 +1,7 @@
 #include "invpend.h"
 #include "cartpole.h"
 #include "mppi.h"
+#include "collision_checker.h"
 
 #include "visualize.h"
 
@@ -15,6 +16,8 @@ int main() {
     double lambda = 1.0;
     double sigma_u = 1.0;
     mppi.init(Nu, lambda, sigma_u);
+    CollisionChecker *collision_checker;
+    mppi.setCollisionChecker(collision_checker);
     mppi.solve();
 
     clock_t finish = clock();

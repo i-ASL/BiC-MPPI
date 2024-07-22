@@ -5,12 +5,12 @@
 #include <autodiff/forward/dual/eigen.hpp>
 using namespace autodiff;
 
+#include "collision_checker.h"
 #include "model_base.h"
 
 #include <vector>
 #include <iostream>
 
-template<typename CollisionChecker>
 class MPPI {
 public:
     template<typename ModelClass>
@@ -18,7 +18,7 @@ public:
     ~MPPI();
 
     void init(int Nu, double lambda, double sigma_u);
-    void setCollisionChecker(CollisionChecker collision_checker);
+    void setCollisionChecker(CollisionChecker *collision_checker);
     void solve();
 
     Eigen::MatrixXd getInitX();
@@ -99,10 +99,9 @@ void MPPI::init(int Nu, double lambda, double sigma_u) {
     this->U_init = U;
 }
 
-template<typename CollisionChecker>
-void MPPI::setCollisionChecker(CollisionChecker &collision_checker) {
+void MPPI::setCollisionChecker(CollisionChecker *collision_checker) {
     this->is_blocked = true;
-    this->collision_checker = collision_checker
+    this->collision_checker = collision_checker;
 }
 
 void MPPI::solve() {
@@ -116,7 +115,7 @@ void MPPI::solve() {
         for (int j = 0; j < N; ++j) {
             Xi.col(j+1) = f(Xi.col(j), Ui.block(i, j, dim_u, 1)).cast<double>();
             cost += q(Xi.col(j), Ui.block(i, j, dim_u, 1));
-            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j), Ui.block(i, j, dim_u, 1));}
+            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j));}
         }
         cost += p(Xi.col(N));
         costs(i) = static_cast<double>(cost.val);
