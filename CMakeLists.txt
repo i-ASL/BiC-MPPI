@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(mppi_cpp)
+project(mppi)
 
 find_package(PythonLibs REQUIRED)
 
