@@ -5,8 +5,8 @@
 #include "visualize.h"
 
 int main() {
-    auto model = InvPend();
-    // auto model = CartPole();
+    // auto model = InvPend();
+    auto model = CartPole();
 
     clock_t start = clock();
 
