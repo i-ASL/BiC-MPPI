@@ -10,6 +10,7 @@ using namespace autodiff;
 #include <vector>
 #include <iostream>
 
+template<typename CollisionChecker>
 class MPPI {
 public:
     template<typename ModelClass>
@@ -17,7 +18,6 @@ public:
     ~MPPI();
 
     void init(int Nu, double lambda, double sigma_u);
-    template<typename CollisionChecker>
     void setCollisionChecker(CollisionChecker collision_checker);
     void solve();
 
@@ -49,9 +49,13 @@ private:
     // Terminal Cost Function
     std::function<dual2nd(VectorXdual2nd)> p;
 
+    bool is_blocked;
+
     int Nu;
     double lambda;
     double sigma_u;
+
+    CollisionChecker *collision_checker;
 
     // Eigen::MatrixXd Xi;
     Eigen::MatrixXd Ui;
@@ -81,6 +85,7 @@ void MPPI::init(int Nu, double lambda, double sigma_u) {
     this->Nu = Nu;
     this->lambda = lambda;
     this->sigma_u = sigma_u;
+    this->is_blocked = false;
 
     this->Ui.resize(dim_u * Nu, N);
     for (int i = 0; i < Nu; ++i) {
@@ -95,8 +100,9 @@ void MPPI::init(int Nu, double lambda, double sigma_u) {
 }
 
 template<typename CollisionChecker>
-void MPPI::setCollisionChecker(CollisionChecker collision_checker) {
-
+void MPPI::setCollisionChecker(CollisionChecker &collision_checker) {
+    this->is_blocked = true;
+    this->collision_checker = collision_checker
 }
 
 void MPPI::solve() {
@@ -110,6 +116,7 @@ void MPPI::solve() {
         for (int j = 0; j < N; ++j) {
             Xi.col(j+1) = f(Xi.col(j), Ui.block(i, j, dim_u, 1)).cast<double>();
             cost += q(Xi.col(j), Ui.block(i, j, dim_u, 1));
+            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j), Ui.block(i, j, dim_u, 1));}
         }
         cost += p(Xi.col(N));
         costs(i) = static_cast<double>(cost.val);
