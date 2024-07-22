@@ -89,7 +89,7 @@ void MPPI::init(int Nu, double lambda, double sigma_u) {
 
     this->Ui.resize(dim_u * Nu, N);
     for (int i = 0; i < Nu; ++i) {
-        Ui.middleRows(i, dim_u) = U;
+        Ui.middleRows(i * dim_u, dim_u) = U;
     }
 
     this->costs.resize(Nu);
@@ -109,12 +109,12 @@ void MPPI::solve() {
     dual2nd cost;
 
     for (int i = 0; i < Nu; ++i) {
-        Ui.middleRows(i, dim_u) = U + Eigen::MatrixXd::Random(dim_u, N) * this->sigma_u;
+        Ui.middleRows(i * dim_u, dim_u) = U + Eigen::MatrixXd::Random(dim_u, N) * this->sigma_u;
         Xi.col(0) = X.col(0);
         cost = 0.0;
         for (int j = 0; j < N; ++j) {
-            Xi.col(j+1) = f(Xi.col(j), Ui.block(i, j, dim_u, 1)).cast<double>();
-            cost += q(Xi.col(j), Ui.block(i, j, dim_u, 1));
+            Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
+            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
             if (is_blocked) {cost += collision_checker->getCost(Xi.col(j));}
         }
         cost += p(Xi.col(N));
@@ -129,7 +129,7 @@ void MPPI::solve() {
 
     U = Eigen::MatrixXd::Zero(dim_u, N);
     for (int i = 0; i < Nu; ++i) {
-        U += Ui.middleRows(i, dim_u) * weights(i);
+        U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
     }
 }
 
