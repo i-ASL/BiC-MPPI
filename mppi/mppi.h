@@ -5,6 +5,7 @@
 #include <autodiff/forward/dual/eigen.hpp>
 using namespace autodiff;
 
+#include "mppi_param.h"
 #include "collision_checker.h"
 #include "model_base.h"
 
@@ -17,7 +18,7 @@ public:
     MPPI(ModelClass model);
     ~MPPI();
 
-    void init(int Nu, double lambda, double sigma_u);
+    void init(MPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
     void solve();
 
@@ -52,7 +53,7 @@ private:
     bool is_blocked;
 
     int Nu;
-    double lambda;
+    double gamma_u;
     double sigma_u;
 
     CollisionChecker *collision_checker;
@@ -81,10 +82,10 @@ MPPI::MPPI(ModelClass model) {
 MPPI::~MPPI() {
 }
 
-void MPPI::init(int Nu, double lambda, double sigma_u) {
-    this->Nu = Nu;
-    this->lambda = lambda;
-    this->sigma_u = sigma_u;
+void MPPI::init(MPPIParam mppi_param) {
+    this->Nu = mppi_param.Nu;
+    this->gamma_u = mppi_param.gamma_u;
+    this->sigma_u = mppi_param.sigma_u;
     this->is_blocked = false;
 
     this->Ui.resize(dim_u * Nu, N);
@@ -122,7 +123,7 @@ void MPPI::solve() {
     }
 
     double min_cost = costs.minCoeff();
-    weights = (-lambda * (costs.array() - min_cost)).exp();
+    weights = (-gamma_u * (costs.array() - min_cost)).exp();
     double total_weight =  weights.sum();
     all_cost.push_back(total_weight);
     weights /= total_weight;
