@@ -21,16 +21,14 @@ public:
     void init(MPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
     void solve();
+    void solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U);
 
     Eigen::MatrixXd getInitX();
     Eigen::MatrixXd getInitU();
     Eigen::MatrixXd getResX();
     Eigen::MatrixXd getResU();
     std::vector<double> getAllCost();
-
-    // void randomizeControl();
-    // double calculateCost(int i);
-
+    
 private:
     int N;
     int dim_x;
@@ -134,6 +132,40 @@ void MPPI::solve() {
     }
 }
 
+void MPPI::solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U) {
+    Eigen::MatrixXd Xi(dim_x, N+1);
+    dual2nd cost;
+
+    for (int i = 0; i < Nu; ++i) {
+        Ui.middleRows(i * dim_u, dim_u) = U + Eigen::MatrixXd::Random(dim_u, N) * this->sigma_u;
+        Xi.col(0) = X.col(0);
+        cost = 0.0;
+        for (int j = 0; j < N; ++j) {
+            Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
+            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j));}
+        }
+        cost += p(Xi.col(N));
+        costs(i) = static_cast<double>(cost.val);
+    }
+
+    double min_cost = costs.minCoeff();
+    weights = (-gamma_u * (costs.array() - min_cost)).exp();
+    double total_weight =  weights.sum();
+    all_cost.push_back(total_weight);
+    weights /= total_weight;
+
+    U = Eigen::MatrixXd::Zero(dim_u, N);
+    for (int i = 0; i < Nu; ++i) {
+        U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
+    }
+
+    for (int j = 0; j < N; ++j) {
+        X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
+    }
+}
+
+
 Eigen::MatrixXd MPPI::getInitX() {
     return X_init;
 }
@@ -156,16 +188,3 @@ Eigen::MatrixXd MPPI::getResU() {
 std::vector<double> MPPI::getAllCost() {
     return all_cost;
 }
-
-// void MPPI::randomizeControl() {
-//     U = U + Eigen::MatrixXf::Random(dim_u, Nu) * this->sigma_u;
-// }
-
-// double MPPI::calculateCost(Eigen::MatrixXd i) {
-//     dual2nd cost = 0.0;
-//     for (int j = 0; j < N; ++j) {
-//         cost += q(Xi.block(i, j, dim_x, 1), Ui.block(i, j, dim_u, 1)).val;
-//     }
-//     cost += static_cast<double>(p(Xi.block(i, N, dim_x, 1)).val);
-//     return static_cast<double>(cost);
-// }

@@ -12,10 +12,11 @@ int main() {
     clock_t start = clock();
 
     MPPI mppi(model);
-    int Nu = 100;
-    double lambda = 1.0;
-    double sigma_u = 1.0;
-    mppi.init(Nu, lambda, sigma_u);
+    MPPIParam mppi_param;
+    mppi_param.Nu = 100;
+    mppi_param.gamma_u = 1.0;
+    mppi_param.sigma_u = 1.0;
+    mppi.init(mppi_param);
     CollisionChecker *collision_checker;
     mppi.setCollisionChecker(collision_checker);
     mppi.solve();
