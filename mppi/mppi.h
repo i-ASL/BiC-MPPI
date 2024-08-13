@@ -1,5 +1,7 @@
 #pragma once
 
+#include <EigenRand/EigenRand>
+
 // For align with IPDDP
 #include <autodiff/forward/dual.hpp>
 #include <autodiff/forward/dual/eigen.hpp>
@@ -9,8 +11,11 @@ using namespace autodiff;
 #include "collision_checker.h"
 #include "model_base.h"
 
+#include <ctime>
 #include <vector>
 #include <iostream>
+
+#include <omp.h>
 
 class MPPI {
 public:
@@ -20,16 +25,17 @@ public:
 
     void init(MPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
-    void solve();
+    virtual Eigen::MatrixXd getNoise();
+    virtual void solve();
     void solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U);
-
+    
     Eigen::MatrixXd getInitX();
     Eigen::MatrixXd getInitU();
     Eigen::MatrixXd getResX();
     Eigen::MatrixXd getResU();
     std::vector<double> getAllCost();
     
-private:
+protected:
     int N;
     int dim_x;
     int dim_u;
@@ -42,21 +48,25 @@ private:
     Eigen::MatrixXd U;
     // Discrete Time System
     std::function<VectorXdual2nd(VectorXdual2nd, VectorXdual2nd)> f;
-    std::vector<std::function<dual2nd(VectorXdual2nd, VectorXdual2nd)>> fs;
     // Stage Cost Function
     std::function<dual2nd(VectorXdual2nd, VectorXdual2nd)> q;
     // Terminal Cost Function
     std::function<dual2nd(VectorXdual2nd)> p;
+    
+    std::function<void(Eigen::Ref<Eigen::MatrixXd>)> h;
 
-    bool is_blocked;
+    std::mt19937_64 urng{static_cast<std::uint_fast64_t>(std::time(nullptr))};
+    // std::mt19937_64 urng{1};
+    Eigen::Rand::NormalGen<double> norm_gen{0.0, 1.0};
 
     int Nu;
     double gamma_u;
-    double sigma_u;
+    Eigen::MatrixXd sigma_u;
 
     CollisionChecker *collision_checker;
 
-    // Eigen::MatrixXd Xi;
+    Eigen::MatrixXd noise;
+
     Eigen::MatrixXd Ui;
     Eigen::VectorXd costs;
     Eigen::VectorXd weights;
@@ -72,9 +82,9 @@ MPPI::MPPI(ModelClass model) {
     this->U = model.U;
     
     this->f = model.f;
-    this->fs = model.fs;
     this->q = model.q;
     this->p = model.p;
+    this->h = model.h;
 }
 
 MPPI::~MPPI() {
@@ -84,37 +94,44 @@ void MPPI::init(MPPIParam mppi_param) {
     this->Nu = mppi_param.Nu;
     this->gamma_u = mppi_param.gamma_u;
     this->sigma_u = mppi_param.sigma_u;
-    this->is_blocked = false;
 
+    this->noise.resize(dim_u, N);
     this->Ui.resize(dim_u * Nu, N);
-    for (int i = 0; i < Nu; ++i) {
-        Ui.middleRows(i * dim_u, dim_u) = U;
-    }
-
     this->costs.resize(Nu);
     this->weights.resize(Nu);
 
-    this->X_init = X;
-    this->U_init = U;
+    // this->X_init = X;
+    // this->U_init = U;
 }
 
 void MPPI::setCollisionChecker(CollisionChecker *collision_checker) {
-    this->is_blocked = true;
     this->collision_checker = collision_checker;
 }
 
-void MPPI::solve() {
-    Eigen::MatrixXd Xi(dim_x, N+1);
-    dual2nd cost;
+Eigen::MatrixXd MPPI::getNoise() {
+    return sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, N, urng);
+}
 
+void MPPI::solve() {
+    Ui = U.replicate(Nu, 1);
+    #pragma omp parallel for
     for (int i = 0; i < Nu; ++i) {
-        Ui.middleRows(i * dim_u, dim_u) = U + Eigen::MatrixXd::Random(dim_u, N) * this->sigma_u;
+        Eigen::MatrixXd Xi(dim_x, N+1);
+        Eigen::MatrixXd noise = getNoise();
+        Ui.middleRows(i * dim_u, dim_u) += noise;
+        h(Ui.middleRows(i * dim_u, dim_u));
+
         Xi.col(0) = X.col(0);
-        cost = 0.0;
+        dual2nd cost = 0.0;
         for (int j = 0; j < N; ++j) {
-            Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
-            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j));}
+            if (collision_checker->getCollisionGrid(Xi.col(j))) {
+                cost = 1e8;
+                break;
+            }
+            else {
+                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+                Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
+            }
         }
         cost += p(Xi.col(N));
         costs(i) = static_cast<double>(cost.val);
@@ -130,20 +147,34 @@ void MPPI::solve() {
     for (int i = 0; i < Nu; ++i) {
         U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
     }
+    h(U);
+
+    // for (int j = 0; j < N; ++j) {
+    //     X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
+    // }
 }
 
 void MPPI::solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U) {
-    Eigen::MatrixXd Xi(dim_x, N+1);
-    dual2nd cost;
+    Ui = U.replicate(Nu, 1);
 
+    #pragma omp parallel for
     for (int i = 0; i < Nu; ++i) {
-        Ui.middleRows(i * dim_u, dim_u) = U + Eigen::MatrixXd::Random(dim_u, N) * this->sigma_u;
+        Eigen::MatrixXd Xi(dim_x, N+1);
+        Eigen::MatrixXd noise = getNoise();
+        Ui.middleRows(i * dim_u, dim_u) += noise;
+        h(Ui.middleRows(i * dim_u, dim_u));
+
         Xi.col(0) = X.col(0);
-        cost = 0.0;
+        dual2nd cost = 0.0;
         for (int j = 0; j < N; ++j) {
-            Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
-            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-            if (is_blocked) {cost += collision_checker->getCost(Xi.col(j));}
+            if (collision_checker->getCollisionGrid(Xi.col(j))) {
+                cost = 1e8;
+                break;
+            }
+            else {
+                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+                Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
+            }
         }
         cost += p(Xi.col(N));
         costs(i) = static_cast<double>(cost.val);
@@ -159,6 +190,7 @@ void MPPI::solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U) {
     for (int i = 0; i < Nu; ++i) {
         U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
     }
+    h(U);
 
     for (int j = 0; j < N; ++j) {
         X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
