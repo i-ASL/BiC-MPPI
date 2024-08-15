@@ -20,5 +20,5 @@ struct BiMPPIParam {
     double deviation_mu;
     double cost_mu;
     int minpts;
-    int epsilon;
+    double epsilon;
 };

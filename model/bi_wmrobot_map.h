@@ -6,7 +6,7 @@ public:
     ~BiWMRobotMap();
 
     const int consts = 4;
-    const double dt = 0.1;
+    const double dt = 0.05;
 };
 
 BiWMRobotMap::BiWMRobotMap() {
@@ -70,7 +70,8 @@ BiWMRobotMap::BiWMRobotMap() {
     };
 
     h = [&](Eigen::Ref<Eigen::MatrixXd> U) -> void {
-        U.row(0) = U.row(0).cwiseMax(0.0).cwiseMin(1.0);
+        // CHECK
+        U.row(0) = U.row(0).cwiseMax(0.7).cwiseMin(0.7);
         U.row(1) = U.row(1).cwiseMax(-1.5).cwiseMin(1.5);
         return;
     };

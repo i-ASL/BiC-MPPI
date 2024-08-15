@@ -1,4 +1,5 @@
 #pragma once
+#include "matplotlibcpp.h"
 
 #include <EigenRand/EigenRand>
 
@@ -30,6 +31,7 @@ public:
     Eigen::MatrixXd getNoise();
     void solve();
     std::vector<std::vector<int>> dbscan(const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N);
+    void show();
     
 private:
     int T;
@@ -61,7 +63,7 @@ private:
     double deviation_mu;
     double cost_mu;
     int minpts;
-    int epsilon;
+    double epsilon;
 
     CollisionChecker *collision_checker;
 
@@ -71,6 +73,7 @@ private:
     Eigen::VectorXd Di_f;
     Eigen::VectorXd costs_f;
     Eigen::VectorXd weights_f;
+    std::vector<std::vector<int>> clusters_f;
 };
 
 template<typename ModelClass>
@@ -118,7 +121,7 @@ Eigen::MatrixXd BiMPPI::getNoise() {
 
 void BiMPPI::solve() {
     Ui_f = U.replicate(Nf, 1);
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < Nf; ++i) {
         Eigen::MatrixXd Xi(dim_x, T+1);
         noise = getNoise();
@@ -141,7 +144,7 @@ void BiMPPI::solve() {
         cost += p(Xi.col(T));
         costs_f(i) = static_cast<double>(cost.val);
     }
-    std::vector<std::vector<int>> clusters = dbscan(Di_f, costs_f, Nf);
+    clusters_f = dbscan(Di_f, costs_f, Nf);
 
     // U = Eigen::MatrixXd::Zero(dim_u,T);
     // for (int i = 0; i < Nu; ++i) {
@@ -157,16 +160,24 @@ void BiMPPI::solve() {
 std::vector<std::vector<int>> BiMPPI::dbscan(const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N) {
     std::vector<bool> core_points(N, false);
     std::map<int, std::vector<int>> core_tree;
+    // std::cout<<"costs = "<<costs * cost_mu<<std::endl;
+    // std::cout<<"costs.mean() = "<<costs.mean()<<std::endl;
+    // std::cout<<"Di = "<<Di * deviation_mu<<std::endl;
+    // std::cout<<"Di.mean() = "<<Di.mean()<<std::endl;
+
     for (int i = 0; i < N; ++i) {
-        std::vector<int> temp_tree;
+        if (costs(i) > 1E7) {continue;}
         for (int j = i + 1; j < N; ++j) {
-            if (deviation_mu*(Di.col(i) - Di.col(j)).norm() + cost_mu*(costs.col(i) - costs.col(j)).norm() < epsilon) {
-                temp_tree.push_back(j);
+            if (costs(j) > 1E7) {continue;}
+            // if (deviation_mu * std::abs(Di(i) - Di(j)) + cost_mu * std::abs(costs(i) - costs(j)) < epsilon) {
+            if (deviation_mu * std::abs(Di(i) - Di(j)) < epsilon) {
+                core_tree[i].push_back(j);
+                core_tree[j].push_back(i);
             }
         }
-        if (minpts < static_cast<int>(temp_tree.size())) {
-            core_points[i] = 1;
-            core_tree[i] = temp_tree;
+        if (minpts < static_cast<int>(core_tree[i].size())) {
+            // std::cout<<"size = "<<static_cast<int>(temp_tree.size())<<std::endl;
+            core_points[i] = true;
         }
     }
     
@@ -182,14 +193,76 @@ std::vector<std::vector<int>> BiMPPI::dbscan(const Eigen::VectorXd &Di, const Ei
         visited[i] = true;
         while (!branch.empty()) {
             int now = branch.front();
-            branch.pop_front();
             for (int next : core_tree[now]) {
+                if (visited[next]) {continue;}
                 visited[next] = true;
                 cluster.push_back(next);
-                if (core_points[next] && !visited[next]) {branch.push_back(next);}
+                if (core_points[next]) {branch.push_back(next);}
             }
+            branch.pop_front();
         }
         clusters.push_back(cluster);
     }
     return clusters;
+}
+
+void BiMPPI::show() {
+    namespace plt = matplotlibcpp;
+    
+    // std::vector<std::vector<double>> cost_deviation(Nf, std::vector<double>(Nf));
+
+    // // double min_cost = costs_f.minCoeff();
+    // // std::cout<<"min_cost = "<<min_cost<<std::endl;
+    // // Eigen::MatrixXd weights = (-gamma_u * (costs_f.array() - min_cost)).exp();
+    // // double total_weight =  weights.sum();
+    // // weights /= total_weight;
+    // // std::cout<<"weights = "<<weights<<std::endl;
+
+    // // costs_f = (costs_f - costs_f.minCoeff()).array().exp();
+    // for (int i = 0; i < T; ++i) {
+    //     // if (costs_f(i) > 1E7) {continue;}
+    //     cost_deviation[0][i] = costs_f(i) * cost_mu;
+    //     cost_deviation[1][i] = Di_f(i) * deviation_mu;
+    // }
+    // plt::scatter(cost_deviation[0], cost_deviation[1], 10.0);
+    // plt::xlim(0.0, 1.5);
+    // plt::show();
+
+    double resolution = 0.1;
+    double hl = resolution / 2;
+    for (int i = 0; i < collision_checker->map.size(); ++i) {
+        for (int j = 0; j < collision_checker->map[0].size(); ++j) {
+            if ((collision_checker->map[i])[j] == 10) {
+                double mx = i*resolution;
+                double my = j*resolution;
+                std::vector<double> oX = {mx-hl, mx+hl, mx+hl, mx-hl, mx-hl};
+                std::vector<double> oY = {my-hl,my-hl,my+hl,my+hl,my-hl};
+                plt::plot(oX, oY, "k");
+            }
+        }
+    }
+    for (int index = 0; index < clusters_f.size(); ++index) {
+        std::cout<<clusters_f[index].size()<<std::endl;
+        for (int k : clusters_f[index]) {
+            std::cout<<"deviation = "<<Di_f(k)<<std::endl;
+            Eigen::MatrixXd Xi(dim_x, T+1);
+            Xi.col(0) = X.col(0);
+            for (int t = 0; t < T; ++t) {
+                Xi.col(t+1) = f(Xi.col(t), Ui_f.block(k * dim_u, t, dim_u, 1)).cast<double>();
+            }
+            std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(T));
+            for (int i = 0; i < dim_x; ++i) {
+                for (int j = 0; j < T + 1; ++j) {
+                    X_MPPI[i][j] = Xi(i, j);
+                }
+            std::string color = "C" + std::to_string(index%10);
+            plt::plot(X_MPPI[0], X_MPPI[1], color);
+            }
+        }
+    }
+
+    plt::xlim(0, 3);
+    plt::ylim(0, 5);
+    plt::grid(true);
+    plt::show();
 }

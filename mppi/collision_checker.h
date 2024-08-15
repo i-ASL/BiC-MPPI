@@ -30,9 +30,9 @@ public:
     bool getCollisionGrid_map(const Eigen::VectorXd &x);
     bool getCollisionCircle_map(const Eigen::VectorXd &z);
 
+    std::vector<std::vector<double>> map;
 private:
     bool with_map;
-    std::vector<std::vector<double>> map;
     double resolution;
     int max_row;
     int max_col;
