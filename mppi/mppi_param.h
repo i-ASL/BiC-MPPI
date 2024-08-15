@@ -11,3 +11,14 @@ struct SmoothMPPIParam{
     double lambda;
     Eigen::MatrixXd w;
 };
+
+struct BiMPPIParam {
+    int Nf;
+    int Nb;
+    double gamma_u;
+    Eigen::MatrixXd sigma_u;
+    double deviation_mu;
+    double cost_mu;
+    int minpts;
+    int epsilon;
+};
