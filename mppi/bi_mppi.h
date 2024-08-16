@@ -28,13 +28,17 @@ public:
 
     void init(BiMPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
-    Eigen::MatrixXd getNoise();
+    void getNoise(Eigen::MatrixXd &noise, const int &T);
     void solve();
-    std::vector<std::vector<int>> dbscan(const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N);
+    void dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T);
+    void calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &costs, const Eigen::MatrixXd &Ui, const int &T);
+    void connectControl(Eigen::MatrixXd &Ur, const Eigen::MatrixXd &Xf, const Eigen::MatrixXd &Xb);
+    // void getTrajectory(Eigen::MatrixXd &X, const Eigen::MatrixXd &U, const int &T, const int &clusters_size)
     void show();
     
 private:
-    int T;
+    int Tf;
+    int Tb;
     int dim_x;
     int dim_u;
 
@@ -56,6 +60,8 @@ private:
     // std::mt19937_64 urng{1};
     Eigen::Rand::NormalGen<double> norm_gen{0.0, 1.0};
 
+    Eigen::VectorXd x_init;
+    Eigen::VectorXd x_target;
     int Nf;
     int Nb;
     double gamma_u;
@@ -67,18 +73,35 @@ private:
 
     CollisionChecker *collision_checker;
 
-    Eigen::MatrixXd noise;
 
+    // Forward
     Eigen::MatrixXd Ui_f;
+    Eigen::MatrixXd noise_f;
     Eigen::VectorXd Di_f;
     Eigen::VectorXd costs_f;
-    Eigen::VectorXd weights_f;
+    // Eigen::VectorXd weights_f;
     std::vector<std::vector<int>> clusters_f;
+    Eigen::MatrixXd Uf;
+    Eigen::MatrixXd Xf;
+
+    // Backward
+    Eigen::MatrixXd Ui_b;
+    Eigen::MatrixXd noise_b;
+    Eigen::VectorXd Di_b;
+    Eigen::VectorXd costs_b;
+    // Eigen::VectorXd weights_f;
+    std::vector<std::vector<int>> clusters_b;
+    Eigen::MatrixXd Ub;
+    Eigen::MatrixXd Xb;
+
+    Eigen::MatrixXd Xr;
+    Eigen::MatrixXd Ur;
 };
 
 template<typename ModelClass>
 BiMPPI::BiMPPI(ModelClass model) {
-    this->T = model.N;
+    this->Tf = model.N;
+    this->Tb = model.N;
     this->dim_x = model.dim_x;
     this->dim_u = model.dim_u;
     
@@ -95,6 +118,8 @@ BiMPPI::~BiMPPI() {
 }
 
 void BiMPPI::init(BiMPPIParam bi_mppi_param) {
+    this->x_init = bi_mppi_param.x_init;
+    this->x_target = bi_mppi_param.x_target;
     this->Nf = bi_mppi_param.Nf;
     this->Nb = bi_mppi_param.Nb;
     this->gamma_u = bi_mppi_param.gamma_u;
@@ -104,34 +129,40 @@ void BiMPPI::init(BiMPPIParam bi_mppi_param) {
     this->minpts = bi_mppi_param.minpts;
     this->epsilon = bi_mppi_param.epsilon;
 
-    this->noise.resize(dim_u, T);
-    this->Ui_f.resize(dim_u * Nf, T);
+    // this->noise_f.resize(dim_u, Tf);
+    this->Ui_f.resize(dim_u * Nf, Tf);
     this->Di_f.resize(Nf);
     this->costs_f.resize(Nf);
-    this->weights_f.resize(Nf);
+    // this->weights_f.resize(Nf);
+
+    // this->noise_b.resize(dim_u, Tb);
+    this->Ui_b.resize(dim_u * Nb, Tb);
+    this->Di_b.resize(Nb);
+    this->costs_b.resize(Nb);
+    // this->weights_b.resize(Nb);
 }
 
 void BiMPPI::setCollisionChecker(CollisionChecker *collision_checker) {
     this->collision_checker = collision_checker;
 }
 
-Eigen::MatrixXd BiMPPI::getNoise() {
-    return sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, T, urng);
+void BiMPPI::getNoise(Eigen::MatrixXd &noise, const int &T) {
+    noise = sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, T, urng);
 }
 
 void BiMPPI::solve() {
+    // Forward Rollout
     Ui_f = U.replicate(Nf, 1);
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i = 0; i < Nf; ++i) {
-        Eigen::MatrixXd Xi(dim_x, T+1);
-        noise = getNoise();
-        Di_f(i) = noise.row(1).mean();
-        Ui_f.middleRows(i * dim_u, dim_u) += noise;
+        Eigen::MatrixXd Xi(dim_x, Tf + 1);
+        getNoise(noise_f, Tf);
+        Ui_f.middleRows(i * dim_u, dim_u) += noise_f;
         h(Ui_f.middleRows(i * dim_u, dim_u));
 
-        Xi.col(0) = X.col(0);
+        Xi.col(0) = x_init;
         dual2nd cost = 0.0;
-        for (int j = 0; j < T; ++j) {
+        for (int j = 0; j < Tf; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;
@@ -141,30 +172,74 @@ void BiMPPI::solve() {
                 Xi.col(j+1) = f(Xi.col(j), Ui_f.block(i * dim_u, j, dim_u, 1)).cast<double>();
             }
         }
-        cost += p(Xi.col(T));
+        cost += p(Xi.col(Tf));
         costs_f(i) = static_cast<double>(cost.val);
+        Di_f(i) = Xi.row(dim_x - 1).mean();
     }
-    clusters_f = dbscan(Di_f, costs_f, Nf);
+    dbscan(clusters_f, Di_f, costs_f, Nf, Tf);
+    calculateU(Uf, clusters_f, costs_f, Ui_f, Tf);
+    // getTrajectory(Xf, Uf, Tb, clusters_f.size());
 
-    // U = Eigen::MatrixXd::Zero(dim_u,T);
-    // for (int i = 0; i < Nu; ++i) {
-    //     U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
-    // }
-    // h(U);
+    // Backward Rollout
+    Ui_b = U.replicate(Nb, 1);
+    // #pragma omp parallel for
+    for (int i = 0; i < Nb; ++i) {
+        Eigen::MatrixXd Xi(dim_x, Tb + 1);
+        getNoise(noise_b, Tb);
+        Ui_b.middleRows(i * dim_u, dim_u) += noise_b;
+        h(Ui_b.middleRows(i * dim_u, dim_u));
 
-    // for (int j = 0; j < T; ++j) {
-    //     X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
-    // }
+        Xi.col(Tb) = x_target;
+        dual2nd cost = 0.0;
+        for (int j = Tb - 1; j >= 0; --j) {
+            // CHECK
+            Xi.col(j) = 2*Xi.col(j+1) - f(Xi.col(j+1), Ui_b.block(i * dim_u, j, dim_u, 1)).cast<double>();
+            cost += q(Xi.col(j), Ui_b.block(i * dim_u, j, dim_u, 1));
+            if (collision_checker->getCollisionGrid(Xi.col(j))) {
+                cost = 1e8;
+                break;
+            }
+        }
+        // CHECK
+        cost += 300 * (Xi.col(0) - x_init).squaredNorm();
+        costs_b(i) = static_cast<double>(cost.val);
+        Di_b(i) = Xi.row(dim_x - 1).mean();
+    }
+    // std::cout<<"Di_f = "<<Di_f<<std::endl;
+    dbscan(clusters_b, Di_b, costs_b, Nb, Tb);
+    calculateU(Ub, clusters_b, costs_b, Ui_b, Tb);
+    // getTrajectory(Xb, Ub, Tb, clusters_b.size());
+
+    Xf.resize(clusters_f.size() * dim_x, Tf + 1);
+    for (int i = 0; i < clusters_f.size(); ++i) {
+        Xf.block(i * dim_x, 0, dim_x, 1) = x_init;
+        for (int t = 0; t < Tf; ++t) {
+            Xf.block(i * dim_x, t + 1, dim_x, 1) = f(Xf.block(i * dim_x, t, dim_x, 1), Uf.block(i * dim_u, t, dim_u, 1)).cast<double>();
+        }
+    }
+
+    Xb.resize(clusters_b.size() * dim_x, Tb + 1);
+    for (int i = 0; i < clusters_b.size(); ++i) {
+        Xb.block(i * dim_x, Tb, dim_x, 1) = x_target;
+        for (int t = Tb - 1; t >= 0; --t) {
+            Xb.block(i * dim_x, t, dim_x, 1) = 2*Xb.block(i * dim_x, t + 1, dim_x, 1) - f(Xb.block(i * dim_x, t + 1, dim_x, 1), Ub.block(i * dim_u, t, dim_u, 1)).cast<double>();
+        }
+    }
+    
+    connectControl(Ur, Xf, Xb);
+
+    Xr.resize(dim_x, Ur.cols() + 1);
+    Xr.col(0) = x_init;
+    for (int t = 0; t < Ur.cols(); ++t) {
+        Xr.col(t+1) = f(Xr.col(t), Ur.col(t)).cast<double>();
+    }
 }
 
-std::vector<std::vector<int>> BiMPPI::dbscan(const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N) {
+void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
+    clusters.clear();
     std::vector<bool> core_points(N, false);
     std::map<int, std::vector<int>> core_tree;
-    // std::cout<<"costs = "<<costs * cost_mu<<std::endl;
-    // std::cout<<"costs.mean() = "<<costs.mean()<<std::endl;
-    // std::cout<<"Di = "<<Di * deviation_mu<<std::endl;
-    // std::cout<<"Di.mean() = "<<Di.mean()<<std::endl;
-
+    #pragma omp parallel for
     for (int i = 0; i < N; ++i) {
         if (costs(i) > 1E7) {continue;}
         for (int j = i + 1; j < N; ++j) {
@@ -175,13 +250,15 @@ std::vector<std::vector<int>> BiMPPI::dbscan(const Eigen::VectorXd &Di, const Ei
                 core_tree[j].push_back(i);
             }
         }
+    }
+
+    #pragma omp parallel for
+    for (int i = 0; i < N; ++i) {
         if (minpts < static_cast<int>(core_tree[i].size())) {
-            // std::cout<<"size = "<<static_cast<int>(temp_tree.size())<<std::endl;
             core_points[i] = true;
         }
     }
     
-    std::vector<std::vector<int>> clusters;
     std::vector<bool> visited(N, false);
     for (int i = 0; i < N; ++i) {
         if (!core_points[i]) {continue;}
@@ -203,30 +280,58 @@ std::vector<std::vector<int>> BiMPPI::dbscan(const Eigen::VectorXd &Di, const Ei
         }
         clusters.push_back(cluster);
     }
-    return clusters;
+}
+
+void BiMPPI::calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &costs, const Eigen::MatrixXd &Ui, const int &T) {
+    U = Eigen::MatrixXd::Zero(clusters.size() * dim_u, T);
+    std::vector<std::vector<double>> weights(clusters.size());
+    #pragma omp parallel for
+    for (int index = 0; index < clusters.size(); ++index) {
+        double min_cost = std::numeric_limits<double>::max();
+        for (int k : clusters[index]) {
+            min_cost = std::min(min_cost, costs(k));
+        }
+
+        weights[index].resize(clusters[index].size());
+        for (size_t i = 0; i < clusters[index].size(); ++i) {
+            int k = clusters[index][i];
+            weights[index][i] = std::exp(-gamma_u * (costs(k) - min_cost));
+        }
+        double total_weight = std::accumulate(weights[index].begin(), weights[index].end(), 0.0);
+
+        for (size_t i = 0; i < clusters[index].size(); ++i) {
+            int k = clusters[index][i];
+            U.middleRows(index * dim_u, dim_u) += (weights[index][i] / total_weight) * Ui.middleRows(k * dim_u, dim_u);
+        }
+    }
+}
+
+// void BiMPPI::getTrajectory(Eigen::MatrixXd &X, const Eigen::MatrixXd &U, const int &T, const int &clusters_size) {
+// }
+
+void BiMPPI::connectControl(Eigen::MatrixXd &Ur, const Eigen::MatrixXd &Xf, const Eigen::MatrixXd &Xb) {
+    double min_norm = std::numeric_limits<double>::max();
+    Eigen::VectorXd temp(3);
+    temp << 10.0, 10.0, 0.01;
+    for (int cf = 0; cf < clusters_f.size(); ++cf) {
+        for (int cb = 0; cb < clusters_b.size(); ++cb) {
+            for (int tf = 0; tf < Tf; ++tf) {
+                for (int tb = 0; tb < Tb; ++tb) {
+                    double norm = (temp.transpose() * (Xf.block(cf * dim_x, tf, dim_x, 1) - Xb.block(cb * dim_x, tb, dim_x, 1))).norm();
+                    if (norm < min_norm) {
+                        min_norm = norm;
+                        Ur.resize(dim_u, tf + (Tb - tb) - 1);
+                        Ur << Uf.block(cf * dim_u, 0, dim_u, tf), Ub.block(cb * dim_u, tb + 1, dim_u, (Tb - tb - 1));
+                    }
+                }
+            }
+        }
+    }
 }
 
 void BiMPPI::show() {
     namespace plt = matplotlibcpp;
-    
-    // std::vector<std::vector<double>> cost_deviation(Nf, std::vector<double>(Nf));
-
-    // // double min_cost = costs_f.minCoeff();
-    // // std::cout<<"min_cost = "<<min_cost<<std::endl;
-    // // Eigen::MatrixXd weights = (-gamma_u * (costs_f.array() - min_cost)).exp();
-    // // double total_weight =  weights.sum();
-    // // weights /= total_weight;
-    // // std::cout<<"weights = "<<weights<<std::endl;
-
-    // // costs_f = (costs_f - costs_f.minCoeff()).array().exp();
-    // for (int i = 0; i < T; ++i) {
-    //     // if (costs_f(i) > 1E7) {continue;}
-    //     cost_deviation[0][i] = costs_f(i) * cost_mu;
-    //     cost_deviation[1][i] = Di_f(i) * deviation_mu;
-    // }
-    // plt::scatter(cost_deviation[0], cost_deviation[1], 10.0);
-    // plt::xlim(0.0, 1.5);
-    // plt::show();
+    plt::subplot(1,2,1);
 
     double resolution = 0.1;
     double hl = resolution / 2;
@@ -241,25 +346,104 @@ void BiMPPI::show() {
             }
         }
     }
+
     for (int index = 0; index < clusters_f.size(); ++index) {
-        std::cout<<clusters_f[index].size()<<std::endl;
         for (int k : clusters_f[index]) {
-            std::cout<<"deviation = "<<Di_f(k)<<std::endl;
-            Eigen::MatrixXd Xi(dim_x, T+1);
-            Xi.col(0) = X.col(0);
-            for (int t = 0; t < T; ++t) {
+            Eigen::MatrixXd Xi(dim_x, Tf+1);
+            Xi.col(0) = x_init;
+            for (int t = 0; t < Tf; ++t) {
                 Xi.col(t+1) = f(Xi.col(t), Ui_f.block(k * dim_u, t, dim_u, 1)).cast<double>();
             }
-            std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(T));
+            std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
             for (int i = 0; i < dim_x; ++i) {
-                for (int j = 0; j < T + 1; ++j) {
+                for (int j = 0; j < Tf + 1; ++j) {
                     X_MPPI[i][j] = Xi(i, j);
                 }
+            }
+            // std::cout<<"deviation = "<<Di_f(k)<<"\t";
+            // std::cout<<"X = "<<Xi.col(T)(0)<<std::endl;
             std::string color = "C" + std::to_string(index%10);
-            plt::plot(X_MPPI[0], X_MPPI[1], color);
+            // plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "1.0"}});
+        }
+    }
+
+    for (int index = 0; index < clusters_b.size(); ++index) {
+        for (int k : clusters_b[index]) {
+            Eigen::MatrixXd Xi(dim_x, Tb+1);
+            Xi.col(Tb) = x_target;
+            for (int t = Tb - 1; t >= 0; --t) {
+                // Xi.col(t) = Xi.col(t+1) - 0.05*f(Xi.col(t+1), Ui_b.block(k * dim_u, t, dim_u, 1)).cast<double>();
+                Xi.col(t) = 2*Xi.col(t+1) - f(Xi.col(t+1), Ui_b.block(k * dim_u, t, dim_u, 1)).cast<double>();
+            }
+            std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tb));
+            for (int i = 0; i < dim_x; ++i) {
+                for (int j = 0; j < Tb + 1; ++j) {
+                    X_MPPI[i][j] = Xi(i, j);
+                }
+            }
+            // std::cout<<"deviation = "<<Di_f(k)<<"\t";
+            // std::cout<<"X = "<<Xi.col(T)(0)<<std::endl;
+            std::string color = "C" + std::to_string(9 - index%10);
+            // plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "1.0"}});
+        }
+    }
+
+    for (int index = 0; index < clusters_f.size(); ++index) {
+        Eigen::MatrixXd Xi(dim_x, Tf + 1);
+        Xi.col(0) = x_init;
+        for (int t = 0; t < Tf; ++t) {
+            Xi.col(t+1) = f(Xi.col(t), Uf.block(index * dim_u, t, dim_u, 1)).cast<double>();
+        }
+        std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tf + 1; ++j) {
+                X_MPPI[i][j] = Xi(i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(index%10);
+        plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
+
+    for (int index = 0; index < clusters_b.size(); ++index) {
+        Eigen::MatrixXd Xi(dim_x, Tb + 1);
+        Xi.col(Tb) = x_target;
+        for (int t = Tb - 1; t >= 0; --t) {
+            Xi.col(t) = 2*Xi.col(t+1) - f(Xi.col(t+1), Ub.block(index * dim_u, t, dim_u, 1)).cast<double>();
+        }
+        std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tb + 1; ++j) {
+                X_MPPI[i][j] = Xi(i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(9 - index%10);
+        plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
+    plt::xlim(0, 3);
+    plt::ylim(0, 5);
+    plt::grid(true);
+    // plt::show();
+    
+    plt::subplot(1,2,2);
+    for (int i = 0; i < collision_checker->map.size(); ++i) {
+        for (int j = 0; j < collision_checker->map[0].size(); ++j) {
+            if ((collision_checker->map[i])[j] == 10) {
+                double mx = i*resolution;
+                double my = j*resolution;
+                std::vector<double> oX = {mx-hl, mx+hl, mx+hl, mx-hl, mx-hl};
+                std::vector<double> oY = {my-hl,my-hl,my+hl,my+hl,my-hl};
+                plt::plot(oX, oY, "k");
             }
         }
     }
+    std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Xr.cols()));
+    for (int i = 0; i < dim_x; ++i) {
+        for (int j = 0; j < Xr.cols(); ++j) {
+            X_MPPI[i][j] = Xr(i, j);
+        }
+    }
+    // std::string color = "C" + std::to_string(9 - index%10);
+    plt::plot(X_MPPI[0], X_MPPI[1], {{"color", "black"}, {"linewidth", "10.0"}});
 
     plt::xlim(0, 3);
     plt::ylim(0, 5);

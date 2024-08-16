@@ -13,6 +13,8 @@ struct SmoothMPPIParam{
 };
 
 struct BiMPPIParam {
+    Eigen::VectorXd x_init;
+    Eigen::VectorXd x_target;
     int Nf;
     int Nb;
     double gamma_u;

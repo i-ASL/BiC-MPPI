@@ -16,6 +16,7 @@ BiWMRobotMap::BiWMRobotMap() {
     // Dimensions
     dim_x = 3;
     dim_u = 2;
+    // dim_u = 2;
     dim_c = consts + 1;
 
     center_point = 2;
@@ -28,7 +29,7 @@ BiWMRobotMap::BiWMRobotMap() {
 
     // U = 0.02*Eigen::MatrixXd::Random(dim_u, N) - Eigen::MatrixXd::Constant(dim_u, N, 0.01);
     U = Eigen::MatrixXd::Zero(dim_u, N);
-    U(0,0) = 0.0;
+    // U.row(1) = U.row(1).array() + M_PI_2;
 
     Y = 0.01*Eigen::MatrixXd::Ones(dim_c, N);
 
@@ -36,10 +37,12 @@ BiWMRobotMap::BiWMRobotMap() {
     
     // Discrete Time System
     auto f0 = [this](const VectorXdual2nd& x, const VectorXdual2nd& u) -> dual2nd {
+        // return x(0) + (u(0) * cos(u(1)) * dt);
         return x(0) + (u(0) * cos(x(2)) * dt);
     };
     fs.push_back(f0);
     auto f1 = [this](const VectorXdual2nd& x, const VectorXdual2nd& u) -> dual2nd {
+        // return x(1) + (u(0) * sin(u(1)) * dt);
         return x(1) + (u(0) * sin(x(2)) * dt);
     };
     fs.push_back(f1);
@@ -55,6 +58,7 @@ BiWMRobotMap::BiWMRobotMap() {
 
     // Terminal Cost Function
     p = [this](const VectorXdual2nd& x) -> dual2nd {
+        return 0.0;
         return 300.0 * ((x(0)-1.5)*(x(0)-1.5) + (x(1)-5.0)*(x(1)-5.0) + (x(2)-M_PI_2)*(x(2)-M_PI_2));
     };
 
@@ -72,6 +76,7 @@ BiWMRobotMap::BiWMRobotMap() {
     h = [&](Eigen::Ref<Eigen::MatrixXd> U) -> void {
         // CHECK
         U.row(0) = U.row(0).cwiseMax(0.7).cwiseMin(0.7);
+        // U.row(1) = U.row(1).cwiseMax(M_PI_2*0.5).cwiseMin(M_PI_2*1.5);
         U.row(1) = U.row(1).cwiseMax(-1.5).cwiseMin(1.5);
         return;
     };
