@@ -59,7 +59,7 @@ BiWMRobotMap::BiWMRobotMap() {
     // Terminal Cost Function
     p = [this](const VectorXdual2nd& x) -> dual2nd {
         return 0.0;
-        return 300.0 * ((x(0)-1.5)*(x(0)-1.5) + (x(1)-5.0)*(x(1)-5.0) + (x(2)-M_PI_2)*(x(2)-M_PI_2));
+        // return 300.0 * ((x(0)-1.5)*(x(0)-1.5) + (x(1)-5.0)*(x(1)-5.0) + (x(2)-M_PI_2)*(x(2)-M_PI_2));
     };
 
     // Constraint
