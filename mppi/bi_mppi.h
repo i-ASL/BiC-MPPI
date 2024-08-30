@@ -140,18 +140,30 @@ Eigen::MatrixXd BiMPPI::getNoise(const int &T) {
 }
 
 void BiMPPI::solve() {
+    // omp setting for nested parallel
+    omp_set_nested(1);
+    
     // 1. Clustered MPPI
-    std::cout<<"ClusteredMPPI"<<std::endl;
-    backwardRollout();
-    forwardRollout();
+    #pragma omp parallel sections
+    {
+        #pragma omp section
+        backwardRollout();
+
+        #pragma omp section
+        forwardRollout();
+    }
+    std::cout<<"Backward : "<<clusters_b.size()<<std::endl;
+    std::cout<<"Forward : "<<clusters_f.size()<<std::endl;
+
+    if (clusters_b.empty() || clusters_f.empty()) {
+        return;
+    }
 
     // 2. Select Connection
-    std::cout<<"SelectConnection"<<std::endl;
     selectConnection();
     concatenate();
 
     // 3. Guide MPPI
-    std::cout<<"GuideMPPI"<<std::endl;
     guideMPPI();
 }
 
@@ -312,17 +324,16 @@ void BiMPPI::guideMPPI() {
             Xi.col(0) = x_init;
             double cost = 0.0;
             for (int j = 0; j < Tr; ++j) {
+                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+                Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
                 if (collision_checker->getCollisionGrid(Xi.col(j))) {
                     cost = 1e8;
-                    break;
-                }
-                else {
-                    cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-                    Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
+                    // break;
                 }
             }
             // Guide Cost
-            cost += 300 * (Xi - X_res).colwise().norm().sum();
+            cost += pt(Xi.col(Tr), x_target);
+            cost += 1000 * (Xi - X_res).colwise().norm().sum();
             costs_r(i) = cost;
         }
         double min_cost = costs_r.minCoeff();
@@ -375,21 +386,24 @@ void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::Vector
     clusters.clear();
     std::vector<bool> core_points(N, false);
     std::map<int, std::vector<int>> core_tree;
+
     #pragma omp parallel for
     for (int i = 0; i < N; ++i) {
         if (costs(i) > 1E7) {continue;}
         for (int j = i + 1; j < N; ++j) {
             if (costs(j) > 1E7) {continue;}
             if (deviation_mu * std::abs(Di(i) - Di(j)) < epsilon) {
+                #pragma omp critical
+                {
                 core_tree[i].push_back(j);
                 core_tree[j].push_back(i);
+                }
             }
         }
     }
 
-    #pragma omp parallel for
     for (int i = 0; i < N; ++i) {
-        if (minpts < static_cast<int>(core_tree[i].size())) {
+        if (minpts < core_tree[i].size()) {
             core_points[i] = true;
         }
     }
@@ -498,37 +512,28 @@ void BiMPPI::show() {
     //     }
     // }
 
-    // for (int index = 0; index < clusters_f.size(); ++index) {
-    //     Eigen::MatrixXd Xi(dim_x, Tf + 1);
-    //     Xi.col(0) = x_init;
-    //     for (int t = 0; t < Tf; ++t) {
-    //         Xi.col(t+1) = f(Xi.col(t), Uf.block(index * dim_u, t, dim_u, 1)).cast<double>();
-    //     }
-    //     std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
-    //     for (int i = 0; i < dim_x; ++i) {
-    //         for (int j = 0; j < Tf + 1; ++j) {
-    //             X_MPPI[i][j] = Xi(i, j);
-    //         }
-    //     }
-    //     std::string color = "C" + std::to_string(index%10);
-    //     plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
-    // }
+    for (int index = 0; index < clusters_f.size(); ++index) {
+        std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tf + 1; ++j) {
+                X_MPPI[i][j] = Xf(index * dim_x + i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(index%10);
+        plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
 
-    // for (int index = 0; index < clusters_b.size(); ++index) {
-    //     Eigen::MatrixXd Xi(dim_x, Tb + 1);
-    //     Xi.col(Tb) = x_target;
-    //     for (int t = Tb - 1; t >= 0; --t) {
-    //         Xi.col(t) = 2*Xi.col(t+1) - f(Xi.col(t+1), Ub.block(index * dim_u, t, dim_u, 1)).cast<double>();
-    //     }
-    //     std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
-    //     for (int i = 0; i < dim_x; ++i) {
-    //         for (int j = 0; j < Tb + 1; ++j) {
-    //             X_MPPI[i][j] = Xi(i, j);
-    //         }
-    //     }
-    //     std::string color = "C" + std::to_string(9 - index%10);
-    //     plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
-    // }
+    for (int index = 0; index < clusters_b.size(); ++index) {
+        std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tb));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tb + 1; ++j) {
+                X_MPPI[i][j] = Xb(index * dim_x + i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(index%10);
+        plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
+
     // // plt::xlim(0, 3);
     // // plt::ylim(0, 5);
     // // plt::grid(true);
