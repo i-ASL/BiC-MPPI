@@ -27,4 +27,5 @@ struct BiMPPIParam {
     double cost_mu;
     int minpts;
     double epsilon;
+    double psi;
 };

@@ -30,10 +30,16 @@ public:
     void selectConnection();
     void concatenate();
     void guideMPPI();
+    
+    void next();
+    void sendToControl();
+    void partitioningControl();
 
     void dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T);
     void calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &costs, const Eigen::MatrixXd &Ui, const int &T);
     void show();
+
+    Eigen::VectorXd getX();
 
     Eigen::MatrixXd U_f0;
     Eigen::MatrixXd U_b0;
@@ -57,6 +63,7 @@ private:
     // std::mt19937_64 urng{1};
     Eigen::Rand::NormalGen<double> norm_gen{0.0, 1.0};
 
+    // Parameters
     float dt;
     int Tf;
     int Tb;
@@ -71,17 +78,19 @@ private:
     double cost_mu;
     int minpts;
     double epsilon;
+    double psi;
 
     CollisionChecker *collision_checker;
 
-
     // Forward
     std::vector<std::vector<int>> clusters_f;
+    std::vector<int> full_cluster_f;
     Eigen::MatrixXd Uf;
     Eigen::MatrixXd Xf;
 
     // Backward
     std::vector<std::vector<int>> clusters_b;
+    std::vector<int> full_cluster_b;
     Eigen::MatrixXd Ub;
     Eigen::MatrixXd Xb;
 
@@ -97,6 +106,7 @@ private:
 
     Eigen::MatrixXd Uo;
     Eigen::MatrixXd Xo;
+    Eigen::VectorXd u0;
 };
 
 template<typename ModelClass>
@@ -129,6 +139,12 @@ void BiMPPI::init(BiMPPIParam bi_mppi_param) {
     this->cost_mu = bi_mppi_param.cost_mu;
     this->minpts = bi_mppi_param.minpts;
     this->epsilon = bi_mppi_param.epsilon;
+    this->psi = bi_mppi_param.psi;
+
+    full_cluster_f.resize(Nf);
+    std::iota(full_cluster_f.begin(), full_cluster_f.end(), 0);
+    full_cluster_b.resize(Nb);
+    std::iota(full_cluster_b.begin(), full_cluster_b.end(), 0);
 }
 
 void BiMPPI::setCollisionChecker(CollisionChecker *collision_checker) {
@@ -152,12 +168,6 @@ void BiMPPI::solve() {
         #pragma omp section
         forwardRollout();
     }
-    std::cout<<"Backward : "<<clusters_b.size()<<std::endl;
-    std::cout<<"Forward : "<<clusters_f.size()<<std::endl;
-
-    if (clusters_b.empty() || clusters_f.empty()) {
-        return;
-    }
 
     // 2. Select Connection
     selectConnection();
@@ -165,6 +175,13 @@ void BiMPPI::solve() {
 
     // 3. Guide MPPI
     guideMPPI();
+}
+
+void BiMPPI::next() {
+    sendToControl();
+
+    // 4. Partitioning Control
+    partitioningControl();
 }
 
 void BiMPPI::backwardRollout() {
@@ -198,6 +215,7 @@ void BiMPPI::backwardRollout() {
         Di(i) = Xi.row(dim_x - 1).mean();
     }
     dbscan(clusters_b, Di, costs, Nb, Tb);
+    if (clusters_b.empty()) {clusters_b.push_back(full_cluster_b);}
     calculateU(Ub, clusters_b, costs, Ui, Tb);
 
     Xb.resize(clusters_b.size() * dim_x, Tb + 1);
@@ -242,6 +260,7 @@ void BiMPPI::forwardRollout() {
         Di(i) = Xi.row(dim_x - 1).mean();
     }
     dbscan(clusters_f, Di, costs, Nf, Tf);
+    if (clusters_f.empty()) {clusters_b.push_back(full_cluster_f);}
     calculateU(Uf, clusters_f, costs, Ui, Tf);
 
     Xf.resize(clusters_f.size() * dim_x, Tf + 1);
@@ -311,7 +330,7 @@ void BiMPPI::guideMPPI() {
         Eigen::MatrixXd Ui = Uc[r].replicate(Nr, 1);
         Eigen::MatrixXd X_res = Xc[r];
         int Tr = Uc[r].cols();
-        Eigen::VectorXd costs_r(Nr);
+        Eigen::VectorXd costs(Nr);
         Eigen::VectorXd weights(Nr);
 
         #pragma omp parallel for
@@ -334,10 +353,10 @@ void BiMPPI::guideMPPI() {
             // Guide Cost
             cost += pt(Xi.col(Tr), x_target);
             cost += 1000 * (Xi - X_res).colwise().norm().sum();
-            costs_r(i) = cost;
+            costs(i) = cost;
         }
-        double min_cost = costs_r.minCoeff();
-        weights = (-gamma_u * (costs_r.array() - min_cost)).exp();
+        double min_cost = costs.minCoeff();
+        weights = (-gamma_u * (costs.array() - min_cost)).exp();
         double total_weight =  weights.sum();
         weights /= total_weight;
 
@@ -380,6 +399,19 @@ void BiMPPI::guideMPPI() {
 
     Uo = Ur[index];
     Xo = Xr[index];
+    u0 = Uo.col(0);
+}
+
+void BiMPPI::sendToControl() {
+    x_init = x_init + (dt * f(x_init, u0));
+}
+
+void BiMPPI::partitioningControl() {
+    U_f0 = Uo.middleCols(1,static_cast<int>(psi * Uo.cols()));
+    U_b0 = Uo.rightCols(static_cast<int>(psi * Uo.cols()));
+
+    Tf = U_f0.cols();
+    Tb = U_b0.cols();
 }
 
 void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
@@ -564,4 +596,8 @@ void BiMPPI::show() {
     plt::ylim(0, 5);
     plt::grid(true);
     plt::show();
+}
+
+Eigen::VectorXd BiMPPI::getX() {
+    return x_init;
 }
