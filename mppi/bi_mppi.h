@@ -180,7 +180,6 @@ void BiMPPI::solve() {
     finish = std::chrono::high_resolution_clock::now();
     elapsed_1 = finish - start;
 
-
     // 2. Select Connection
     start = std::chrono::high_resolution_clock::now();
     selectConnection();
@@ -221,12 +220,15 @@ void BiMPPI::backwardRollout() {
                 Xi.col(j) = Xi.col(j+1) - (dt * f(Xi.col(j+1), Ui.block(i * dim_u, j + 1, dim_u, 1)));
             }
             cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+        }
+        cost += pi(Xi.col(0), x_init);
+        for (int j = Tb - 1; j >= 0; --j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;
             }
         }
-        cost += pi(Xi.col(0), x_init);
+
         costs(i) = cost;
         Di(i) = Xi.row(dim_x - 1).mean();
     }
@@ -262,21 +264,22 @@ void BiMPPI::forwardRollout() {
         Xi.col(0) = x_init;
         double cost = 0.0;
         for (int j = 0; j < Tf; ++j) {
+            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+            Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
+        }
+        cost += pt(Xi.col(Tf), x_target);
+        for (int j = 0; j < Tf; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;
             }
-            else {
-                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-                Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
-            }
         }
-        cost += pt(Xi.col(Tf), x_target);
+
         costs(i) = cost;
         Di(i) = Xi.row(dim_x - 1).mean();
     }
     dbscan(clusters_f, Di, costs, Nf, Tf);
-    if (clusters_f.empty()) {clusters_b.push_back(full_cluster_f);}
+    if (clusters_f.empty()) {clusters_f.push_back(full_cluster_f);}
     calculateU(Uf, clusters_f, costs, Ui, Tf);
 
     Xf.resize(clusters_f.size() * dim_x, Tf + 1);
@@ -313,6 +316,8 @@ void BiMPPI::selectConnection() {
 void BiMPPI::concatenate() {
     Uc.clear();
     Xc.clear();
+    std::cout<<"joints.size() = "<<joints.size()<<std::endl;
+
     for (std::vector<int> joint : joints) {
         int cf = joint[0];
         int cb = joint[1];
@@ -322,7 +327,6 @@ void BiMPPI::concatenate() {
         Eigen::MatrixXd U(dim_u, df + (Tb - db) + 1);
         Eigen::MatrixXd X(dim_x, df + (Tb - db) + 2);
 
-        // Exception Handling
         U << Uf.block(cf * dim_u, 0, dim_u, df+1), Ub.block(cb * dim_u, db, dim_u, Tb - db);
         X << Xf.block(cf * dim_x, 0, dim_x, df+1), Xb.block(cb * dim_x, db, dim_x, Tb - db + 1);
 
@@ -336,7 +340,7 @@ void BiMPPI::guideMPPI() {
     Cr.clear();
     Xr.clear();
     
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int r = 0; r < joints.size(); ++r) {
         Eigen::MatrixXd Ui = Uc[r].replicate(Nr, 1);
         Eigen::MatrixXd X_res = Xc[r];
@@ -362,7 +366,7 @@ void BiMPPI::guideMPPI() {
             }
             // Guide Cost
             cost += pt(Xi.col(Tr), x_target);
-            cost += 100 * (Xi - X_res).colwise().norm().sum();
+            cost += 300 * (Xi - X_res).colwise().norm().sum();
             costs(i) = cost;
         }
         double min_cost = costs.minCoeff();
@@ -406,7 +410,7 @@ void BiMPPI::guideMPPI() {
             index = r;
         }
     }
-
+    std::cout<<"min_cost = "<<min_cost<<std::endl;
     Uo = Ur[index];
     Xo = Xr[index];
     u0 = Uo.col(0);
@@ -414,11 +418,11 @@ void BiMPPI::guideMPPI() {
 
 void BiMPPI::partitioningControl() {
     int T = Uo.cols();
-    int n = std::ceil(psi * T);
-    // U_f0 = Uo.middleCols(1,std::min(std::max(3,n), T-1));
-    // U_b0 = Uo.rightCols(std::min(std::max(3,n), T-1));
-    U_f0 = Uo.middleCols(1,n);
-    U_b0 = Uo.rightCols(n);
+    int n = std::ceil(psi * (T-1));
+    U_f0 = Uo.middleCols(1,std::min(n,T-2));
+    U_b0 = Uo.rightCols(std::min(n,T-1));
+    // U_f0 = Uo.middleCols(1,n);
+    // U_b0 = Uo.rightCols(n);
 
     Tf = U_f0.cols();
     Tb = U_b0.cols();
