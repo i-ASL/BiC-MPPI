@@ -42,11 +42,11 @@ int main() {
         
         while (true) {
             bi_mppi.solve();
-            // std::cout<<"1 solved in "<<bi_mppi.elapsed_1.count()<<std::endl;
-            // std::cout<<"2 solved in "<<bi_mppi.elapsed_2.count()<<std::endl;
-            // std::cout<<"3 solved in "<<bi_mppi.elapsed_3.count()<<std::endl;
+            std::cout<<"1 solved in "<<bi_mppi.elapsed_1.count()<<std::endl;
+            std::cout<<"2 solved in "<<bi_mppi.elapsed_2.count()<<std::endl;
+            std::cout<<"3 solved in "<<bi_mppi.elapsed_3.count()<<std::endl;
             
-            std::cout<<bi_mppi.getX().transpose()<<std::endl;
+            // std::cout<<bi_mppi.getX().transpose()<<std::endl;
             if (bi_mppi.getX()(1) > 5.0) {break;}
         }
         bi_mppi.showTraj();

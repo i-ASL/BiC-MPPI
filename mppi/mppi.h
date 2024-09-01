@@ -1,11 +1,7 @@
 #pragma once
+#include "matplotlibcpp.h"
 
 #include <EigenRand/EigenRand>
-
-// For align with IPDDP
-#include <autodiff/forward/dual.hpp>
-#include <autodiff/forward/dual/eigen.hpp>
-using namespace autodiff;
 
 #include "mppi_param.h"
 #include "collision_checker.h"
@@ -25,65 +21,56 @@ public:
 
     void init(MPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
-    virtual Eigen::MatrixXd getNoise();
+    virtual Eigen::MatrixXd getNoise(const int &T);
     virtual void solve();
-    void solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U);
-    
-    Eigen::MatrixXd getInitX();
-    Eigen::MatrixXd getInitU();
-    Eigen::MatrixXd getResX();
-    Eigen::MatrixXd getResU();
-    std::vector<double> getAllCost();
-    
+    void showTraj();
+
+    Eigen::MatrixXd U_0;
+    Eigen::VectorXd x_init;
+
 protected:
-    int N;
     int dim_x;
     int dim_u;
 
-    Eigen::MatrixXd X_init;
-    Eigen::MatrixXd U_init;
-    std::vector<double> all_cost;
+    Eigen::MatrixXd Uo;
+    Eigen::MatrixXd Xo;
 
-    Eigen::MatrixXd X;
-    Eigen::MatrixXd U;
     // Discrete Time System
-    std::function<VectorXdual2nd(VectorXdual2nd, VectorXdual2nd)> f;
+    std::function<Eigen::MatrixXd(Eigen::VectorXd, Eigen::VectorXd)> f;
     // Stage Cost Function
-    std::function<dual2nd(VectorXdual2nd, VectorXdual2nd)> q;
+    std::function<double(Eigen::VectorXd, Eigen::VectorXd)> q;
     // Terminal Cost Function
-    std::function<dual2nd(VectorXdual2nd)> p;
-    
+    std::function<double(Eigen::VectorXd, Eigen::VectorXd)> p;
+    // Projection
     std::function<void(Eigen::Ref<Eigen::MatrixXd>)> h;
 
     std::mt19937_64 urng{static_cast<std::uint_fast64_t>(std::time(nullptr))};
     // std::mt19937_64 urng{1};
     Eigen::Rand::NormalGen<double> norm_gen{0.0, 1.0};
 
-    int Nu;
+    // Parameters
+    float dt;
+    int T;
+    Eigen::VectorXd x_target;
+    int N;
     double gamma_u;
     Eigen::MatrixXd sigma_u;
-
+    
     CollisionChecker *collision_checker;
 
-    Eigen::MatrixXd noise;
+    Eigen::VectorXd u0;
 
-    Eigen::MatrixXd Ui;
-    Eigen::VectorXd costs;
-    Eigen::VectorXd weights;
+    std::vector<Eigen::MatrixXd> visual_traj;
 };
 
 template<typename ModelClass>
 MPPI::MPPI(ModelClass model) {
-    this->N = model.N;
     this->dim_x = model.dim_x;
     this->dim_u = model.dim_u;
-    
-    this->X = model.X;
-    this->U = model.U;
-    
+
     this->f = model.f;
     this->q = model.q;
-    this->p = model.p;
+    this->p = model.pt;
     this->h = model.h;
 }
 
@@ -91,132 +78,99 @@ MPPI::~MPPI() {
 }
 
 void MPPI::init(MPPIParam mppi_param) {
-    this->Nu = mppi_param.Nu;
+    this->dt = mppi_param.dt;
+    this->T = mppi_param.T;
+    this->x_init = mppi_param.x_init;
+    this->x_target = mppi_param.x_target;
+    this->N = mppi_param.N;
     this->gamma_u = mppi_param.gamma_u;
     this->sigma_u = mppi_param.sigma_u;
 
-    this->noise.resize(dim_u, N);
-    this->Ui.resize(dim_u * Nu, N);
-    this->costs.resize(Nu);
-    this->weights.resize(Nu);
-
-    // this->X_init = X;
-    // this->U_init = U;
+    u0 = Eigen::VectorXd::Zero(dim_u);
 }
 
 void MPPI::setCollisionChecker(CollisionChecker *collision_checker) {
     this->collision_checker = collision_checker;
 }
 
-Eigen::MatrixXd MPPI::getNoise() {
-    return sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, N, urng);
+Eigen::MatrixXd MPPI::getNoise(const int &T) {
+    return sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, T, urng);
 }
 
 void MPPI::solve() {
-    Ui = U.replicate(Nu, 1);
+    x_init = x_init + (dt * f(x_init, u0));
+
+    Eigen::MatrixXd Ui = U_0.replicate(N, 1);
+    Eigen::VectorXd costs(N);
+    Eigen::VectorXd weights(N);
     #pragma omp parallel for
-    for (int i = 0; i < Nu; ++i) {
-        Eigen::MatrixXd Xi(dim_x, N+1);
-        Eigen::MatrixXd noise = getNoise();
+    for (int i = 0; i < N; ++i) {
+        Eigen::MatrixXd Xi(dim_x, T+1);
+        Eigen::MatrixXd noise = getNoise(T);
         Ui.middleRows(i * dim_u, dim_u) += noise;
         h(Ui.middleRows(i * dim_u, dim_u));
 
-        Xi.col(0) = X.col(0);
-        dual2nd cost = 0.0;
-        for (int j = 0; j < N; ++j) {
+        Xi.col(0) = x_init;
+        double cost = 0.0;
+        for (int j = 0; j < T; ++j) {
+            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+            Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
+        }
+        cost += p(Xi.col(T), x_target);
+        for (int j = 0; j < T; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;
             }
-            else {
-                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-                Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
-            }
         }
-        cost += p(Xi.col(N));
-        costs(i) = static_cast<double>(cost.val);
+        costs(i) = cost;
     }
 
     double min_cost = costs.minCoeff();
     weights = (-gamma_u * (costs.array() - min_cost)).exp();
     double total_weight =  weights.sum();
-    all_cost.push_back(total_weight);
     weights /= total_weight;
 
-    U = Eigen::MatrixXd::Zero(dim_u, N);
-    for (int i = 0; i < Nu; ++i) {
-        U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
+    Uo = Eigen::MatrixXd::Zero(dim_u, T);
+    for (int i = 0; i < N; ++i) {
+        Uo += Ui.middleRows(i * dim_u, dim_u) * weights(i);
     }
-    h(U);
+    h(Uo);
 
-    // for (int j = 0; j < N; ++j) {
-    //     X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
-    // }
+    u0 = Uo.col(0);
+    U_0.leftCols(T-1) = Uo.rightCols(T-1);
+
+    visual_traj.push_back(x_init);
 }
 
-void MPPI::solve(Eigen::MatrixXd &X, Eigen::MatrixXd &U) {
-    Ui = U.replicate(Nu, 1);
+void MPPI::showTraj() {
+    namespace plt = matplotlibcpp;
 
-    #pragma omp parallel for
-    for (int i = 0; i < Nu; ++i) {
-        Eigen::MatrixXd Xi(dim_x, N+1);
-        Eigen::MatrixXd noise = getNoise();
-        Ui.middleRows(i * dim_u, dim_u) += noise;
-        h(Ui.middleRows(i * dim_u, dim_u));
-
-        Xi.col(0) = X.col(0);
-        dual2nd cost = 0.0;
-        for (int j = 0; j < N; ++j) {
-            if (collision_checker->getCollisionGrid(Xi.col(j))) {
-                cost = 1e8;
-                break;
-            }
-            else {
-                cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
-                Xi.col(j+1) = f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)).cast<double>();
+    double resolution = 0.1;
+    double hl = resolution / 2;
+    for (int i = 0; i < collision_checker->map.size(); ++i) {
+        for (int j = 0; j < collision_checker->map[0].size(); ++j) {
+            if ((collision_checker->map[i])[j] == 10) {
+                double mx = i*resolution;
+                double my = j*resolution;
+                std::vector<double> oX = {mx-hl, mx+hl, mx+hl, mx-hl, mx-hl};
+                std::vector<double> oY = {my-hl,my-hl,my+hl,my+hl,my-hl};
+                plt::plot(oX, oY, "k");
             }
         }
-        cost += p(Xi.col(N));
-        costs(i) = static_cast<double>(cost.val);
     }
 
-    double min_cost = costs.minCoeff();
-    weights = (-gamma_u * (costs.array() - min_cost)).exp();
-    double total_weight =  weights.sum();
-    all_cost.push_back(total_weight);
-    weights /= total_weight;
-
-    U = Eigen::MatrixXd::Zero(dim_u, N);
-    for (int i = 0; i < Nu; ++i) {
-        U += Ui.middleRows(i * dim_u, dim_u) * weights(i);
+    std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(visual_traj.size()));
+    for (int i = 0; i < dim_x; ++i) {
+        for (int j = 0; j < visual_traj.size(); ++j) {
+            X_MPPI[i][j] = visual_traj[j](i);
+        }
     }
-    h(U);
+    // std::string color = "C" + std::to_string(9 - index%10);
+    plt::plot(X_MPPI[0], X_MPPI[1], {{"color", "black"}, {"linewidth", "10.0"}});
 
-    for (int j = 0; j < N; ++j) {
-        X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
-    }
-}
-
-
-Eigen::MatrixXd MPPI::getInitX() {
-    return X_init;
-}
-
-Eigen::MatrixXd MPPI::getInitU() {
-    return U_init;
-}
-
-Eigen::MatrixXd MPPI::getResX() {
-    for (int j = 0; j < N; ++j) {
-        X.col(j+1) = f(X.col(j), U.col(j)).cast<double>();
-    }
-    return X;
-}
-
-Eigen::MatrixXd MPPI::getResU() {
-    return U;
-}
-
-std::vector<double> MPPI::getAllCost() {
-    return all_cost;
+    plt::xlim(0, 3);
+    plt::ylim(0, 5);
+    plt::grid(true);
+    plt::show();
 }

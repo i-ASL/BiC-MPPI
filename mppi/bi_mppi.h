@@ -177,6 +177,7 @@ void BiMPPI::solve() {
         #pragma omp section
         forwardRollout();
     }
+
     finish = std::chrono::high_resolution_clock::now();
     elapsed_1 = finish - start;
 
@@ -316,7 +317,6 @@ void BiMPPI::selectConnection() {
 void BiMPPI::concatenate() {
     Uc.clear();
     Xc.clear();
-    std::cout<<"joints.size() = "<<joints.size()<<std::endl;
 
     for (std::vector<int> joint : joints) {
         int cf = joint[0];
@@ -410,7 +410,6 @@ void BiMPPI::guideMPPI() {
             index = r;
         }
     }
-    std::cout<<"min_cost = "<<min_cost<<std::endl;
     Uo = Ur[index];
     Xo = Xr[index];
     u0 = Uo.col(0);

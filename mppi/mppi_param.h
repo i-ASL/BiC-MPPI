@@ -1,7 +1,11 @@
 #include <Eigen/Dense>
 
 struct MPPIParam {
-    int Nu;
+    float dt;
+    int T;
+    Eigen::VectorXd x_init;
+    Eigen::VectorXd x_target;
+    int N;
     double gamma_u;
     Eigen::MatrixXd sigma_u;
 };

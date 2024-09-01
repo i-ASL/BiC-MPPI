@@ -31,7 +31,7 @@ WMRobotMap::WMRobotMap() {
 
     // Terminal Cost Function
     pt = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_target) -> double {
-        return 500 * (x - x_target).norm();
+        return 1000 * (x - x_target).norm();
     };
 
     // Initial Cost Function

@@ -16,7 +16,7 @@ include_directories(
 )
 
 add_executable(${PROJECT_NAME}
-    main.cpp
+    src/log_mppi.cpp
 )
 
 # add_compile_options(-march=native)
