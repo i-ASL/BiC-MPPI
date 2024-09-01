@@ -31,12 +31,12 @@ WMRobotMap::WMRobotMap() {
 
     // Terminal Cost Function
     pt = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_target) -> double {
-        return 300 * (x - x_target).norm();
+        return 100 * (x - x_target).norm();
     };
 
     // Initial Cost Function
     pi = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_init) -> double {
-        return 300 * (x - x_init).norm();
+        return 100 * (x - x_init).norm();
     };
 
     h = [&](Eigen::Ref<Eigen::MatrixXd> U) -> void {
