@@ -151,6 +151,7 @@ bool CollisionChecker::getCollisionGrid_map(const Eigen::VectorXd &x) {
     if (nx < 0 || max_row <= nx) {return false;}
     if (nx < 0 || max_col <= ny) {return false;}
     if (map[nx][ny] == 10) {return true;}
+    // if (map[nx][ny] < 0.8) {return true;}
     return false;
 }
 

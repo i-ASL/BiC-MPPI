@@ -7,7 +7,7 @@ public:
     WMRobotMap();
     ~WMRobotMap();
 
-    const double velocity = 0.3;
+    const double velocity = 0.5;
 };
 
 WMRobotMap::WMRobotMap() {
@@ -26,22 +26,17 @@ WMRobotMap::WMRobotMap() {
 
     // Stage Cost Function
     q = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& u) -> double {
-        return (u.squaredNorm());
+        return u.norm();
     };
 
     // Terminal Cost Function
-    pt = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_target) -> double {
-        return 1000 * (x - x_target).norm();
-    };
-
-    // Initial Cost Function
-    pi = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_init) -> double {
-        return 500 * (x - x_init).norm();
+    p = [this](const Eigen::VectorXd& x, const Eigen::VectorXd& x_target) -> double {
+        return (x - x_target).norm();
     };
 
     h = [&](Eigen::Ref<Eigen::MatrixXd> U) -> void {
         U.row(0) = U.row(0).cwiseMax(velocity).cwiseMin(velocity);
-        U.row(1) = U.row(1).cwiseMax(-1.5).cwiseMin(1.5);
+        U.row(1) = U.row(1).cwiseMax(-0.5).cwiseMin(0.5);
         return;
     };
 }

@@ -22,6 +22,7 @@ public:
     void init(MPPIParam mppi_param);
     void setCollisionChecker(CollisionChecker *collision_checker);
     virtual Eigen::MatrixXd getNoise(const int &T);
+    void move();
     virtual void solve();
     void showTraj();
 
@@ -70,7 +71,7 @@ MPPI::MPPI(ModelClass model) {
 
     this->f = model.f;
     this->q = model.q;
-    this->p = model.pt;
+    this->p = model.p;
     this->h = model.h;
 }
 
@@ -97,9 +98,11 @@ Eigen::MatrixXd MPPI::getNoise(const int &T) {
     return sigma_u * norm_gen.template generate<Eigen::MatrixXd>(dim_u, T, urng);
 }
 
-void MPPI::solve() {
+void MPPI::move() {
     x_init = x_init + (dt * f(x_init, u0));
+}
 
+void MPPI::solve() {
     Eigen::MatrixXd Ui = U_0.replicate(N, 1);
     Eigen::VectorXd costs(N);
     Eigen::VectorXd weights(N);
@@ -113,11 +116,12 @@ void MPPI::solve() {
         Xi.col(0) = x_init;
         double cost = 0.0;
         for (int j = 0; j < T; ++j) {
-            cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
+            cost += p(Xi.col(j), x_target);
+            // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
             Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
         }
         cost += p(Xi.col(T), x_target);
-        for (int j = 0; j < T; ++j) {
+        for (int j = 1; j < T+1; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;

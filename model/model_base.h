@@ -15,9 +15,7 @@ public:
     // Stage Cost Function
     std::function<double(Eigen::VectorXd, Eigen::VectorXd)> q;
     // Terminal Cost Function
-    std::function<double(Eigen::VectorXd, Eigen::VectorXd)> pt;
-    // Initial Cost Function
-    std::function<double(Eigen::VectorXd, Eigen::VectorXd)> pi;
+    std::function<double(Eigen::VectorXd, Eigen::VectorXd)> p;
     // Projection
     std::function<void(Eigen::Ref<Eigen::MatrixXd>)> h;
 };
