@@ -13,8 +13,8 @@ int main() {
     
     SolverParam param;
     param.dt = 0.1;
-    param.Tf = 40;
-    param.Tb = 40;
+    param.Tf = 50;
+    param.Tb = 50;
     param.x_init.resize(model.dim_x);
     param.x_init << 2.5, 0.0, M_PI_2;
     param.x_target.resize(model.dim_x);
@@ -30,13 +30,14 @@ int main() {
     param.cost_mu = 1.0;
     param.minpts = 5;
     param.epsilon = 0.01;
-    param.psi = 0.6;
+    param.psi = 0.8;
 
     int maxiter = 500;
 
     // for (int map = 299; map >= 0 ; --map) {
     // for (int map = 276; map >= 0; --map) {
-    for (int s = 0; s < 3; ++s) {
+    for (int s = 2; s < 3; ++s) {
+    // for (int s = 1; s < 2; ++s) {
         switch (s)
         {
         case 0:
@@ -51,36 +52,47 @@ int main() {
         default:
             break;
         }
-        for (int map = 0; map < 300; ++map) {
+        for (int map = 299; map >= 0; --map) {
+        // for (int map = 0; map < 300; ++map) {
             CollisionChecker collision_checker = CollisionChecker();
             collision_checker.loadMap("../BARN_dataset/txt_files/output_"+std::to_string(map)+".txt", 0.1);
-            Solver solver(model);
-            solver.U_f0 = Eigen::MatrixXd::Zero(model.dim_u, param.Tf);
-            solver.U_b0 = Eigen::MatrixXd::Zero(model.dim_u, param.Tb);
-            solver.init(param);
-            solver.setCollisionChecker(&collision_checker);
             
             bool is_success = false;
             int i = 0;
+            Eigen::VectorXd x_prev = param.x_init;
+            double total_elapsed = 0.0;
+            double total_elapsed_1 = 0.0;
+            double total_elapsed_2 = 0.0;
+            double total_elapsed_3 = 0.0;
             for (i = 0; i < maxiter; ++i) {
+                Solver solver(model);
+                solver.U_f0 = Eigen::MatrixXd::Zero(model.dim_u, param.Tf);
+                solver.U_b0 = Eigen::MatrixXd::Zero(model.dim_u, param.Tb);
+                solver.init(param);
+                solver.setCollisionChecker(&collision_checker);
+
+                solver.x_init = x_prev;
+                solver.x_target(1) = 5.0 + (0.05 * float(i));
+
                 solver.solve();
                 solver.move();
-                // std::cout<<"1 solved in "<<solver.elapsed_1.count()<<std::endl;
-                // std::cout<<"2 solved in "<<solver.elapsed_2.count()<<std::endl;
-                // std::cout<<"3 solved in "<<solver.elapsed_3.count()<<std::endl;
-                
-                // std::cout<<solver.getX().transpose()<<std::endl;
+                x_prev = solver.x_init;
+                total_elapsed += solver.elapsed;
+                total_elapsed_1 += solver.elapsed_1.count();
+                total_elapsed_2 += solver.elapsed_2.count();
+                total_elapsed_3 += solver.elapsed_3.count();
                 if (collision_checker.getCollisionGrid(solver.x_init)) {
                     break;
                 }
-                if ((solver.x_init - param.x_target).norm() < 0.3) {
+                if (solver.x_init(1) > 5.0) {
                     is_success = true;
                     break;
                 }
+                // std::cout<<solver.x_init.transpose()<<std::endl;
+                // solver.show();
             }
-            // std::cout<<"iter = "<<i<<"\tpass = "<<is_success<<std::endl;
-            std::cout<<s<<'\t'<<map<<'\t'<<i<<'\t'<<is_success<<std::endl;
-            // solver.showTraj();
+            std::cout<<s<<'\t'<<map<<'\t'<<i<<'\t'<<is_success<<'\t'<<total_elapsed<<std::endl;
+            // std::cout<<total_elapsed_1<<'\t'<<total_elapsed_2<<'\t'<<total_elapsed_3<<std::endl;
         }
     }    
 

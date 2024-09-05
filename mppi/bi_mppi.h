@@ -44,12 +44,19 @@ public:
     std::chrono::duration<double> elapsed_1;
     std::chrono::duration<double> elapsed_2;
     std::chrono::duration<double> elapsed_3;
+    std::chrono::duration<double> elapsed_4;
+    double elapsed;
     std::vector<Eigen::VectorXd> visual_traj;
 
     Eigen::MatrixXd U_f0;
     Eigen::MatrixXd U_b0;
 
     Eigen::VectorXd x_init;
+    Eigen::VectorXd x_target;
+
+    Eigen::MatrixXd Uo;
+    Eigen::MatrixXd Xo;
+    Eigen::VectorXd u0;
     
 private:
     int dim_x;
@@ -72,7 +79,6 @@ private:
     float dt;
     int Tf;
     int Tb;
-    Eigen::VectorXd x_target;
     int Nf;
     int Nb;
     int Nr;
@@ -107,10 +113,6 @@ private:
     std::vector<Eigen::MatrixXd> Ur;
     std::vector<double> Cr;
     std::vector<Eigen::MatrixXd> Xr;
-
-    Eigen::MatrixXd Uo;
-    Eigen::MatrixXd Xo;
-    Eigen::VectorXd u0;
 };
 
 template<typename ModelClass>
@@ -162,6 +164,7 @@ Eigen::MatrixXd BiMPPI::getNoise(const int &T) {
 
 void BiMPPI::move() {
     x_init = x_init + (dt * f(x_init, u0));
+    U_f0 = U_f0.rightCols(U_f0.cols() - 1);
 }
 
 void BiMPPI::solve() {
@@ -169,18 +172,27 @@ void BiMPPI::solve() {
     omp_set_nested(1);
     
     // 1. Clustered MPPI
+    Tf = U_f0.cols();
+    Tb = U_b0.cols();
+    // start = std::chrono::high_resolution_clock::now();
+    // #pragma omp parallel sections num_threads(12)
+    // {
+    //     #pragma omp section
+    //     backwardRollout();
+
+    //     #pragma omp section
+    //     forwardRollout();
+    // }
+    // finish = std::chrono::high_resolution_clock::now();
+    // elapsed_1 = finish - start;
+    // std::cout<<"Fir = "<<elapsed_1.count()<<std::endl;
+
     start = std::chrono::high_resolution_clock::now();
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        backwardRollout();
-
-        #pragma omp section
-        forwardRollout();
-    }
-
+    backwardRollout();
+    forwardRollout();
     finish = std::chrono::high_resolution_clock::now();
     elapsed_1 = finish - start;
+    // std::cout<<"Sec = "<<elapsed_1.count()<<std::endl;
 
     // 2. Select Connection
     start = std::chrono::high_resolution_clock::now();
@@ -196,7 +208,12 @@ void BiMPPI::solve() {
     elapsed_3 = finish - start;
 
     // 4. Partitioning Control
+    start = std::chrono::high_resolution_clock::now();
     partitioningControl();
+    finish = std::chrono::high_resolution_clock::now();
+    elapsed_4 = finish - start;
+
+    elapsed = elapsed_1.count() + elapsed_2.count() + elapsed_3.count();
 
     visual_traj.push_back(x_init);
 }
@@ -205,6 +222,7 @@ void BiMPPI::backwardRollout() {
     Eigen::MatrixXd Ui = U_b0.replicate(Nb, 1);
     Eigen::VectorXd Di(Nb);
     Eigen::VectorXd costs(Nb);
+    bool all_feasible = true;
     #pragma omp parallel for
     for (int i = 0; i < Nb; ++i) {
         Eigen::MatrixXd Xi(dim_x, Tb + 1);
@@ -222,20 +240,22 @@ void BiMPPI::backwardRollout() {
                 Xi.col(j) = Xi.col(j+1) - (dt * f(Xi.col(j+1), Ui.block(i * dim_u, j + 1, dim_u, 1)));
             }
             cost += p(Xi.col(j), x_init);
-            // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
         }
         cost += p(Xi.col(0), x_init);
         for (int j = 0; j <= Tb; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
+                all_feasible = false;
                 break;
             }
         }
-
         costs(i) = cost;
         Di(i) = Xi.row(dim_x - 1).mean();
     }
-    dbscan(clusters_b, Di, costs, Nb, Tb);
+
+    if (!all_feasible) {dbscan(clusters_b, Di, costs, Nb, Tb);}
+    else {clusters_b.clear();}
+
     if (clusters_b.empty()) {clusters_b.push_back(full_cluster_b);}
     calculateU(Ub, clusters_b, costs, Ui, Tb);
 
@@ -257,6 +277,7 @@ void BiMPPI::forwardRollout() {
     Eigen::MatrixXd Ui = U_f0.replicate(Nf, 1);
     Eigen::VectorXd Di(Nf);
     Eigen::VectorXd costs(Nf);
+    bool all_feasible = true;
     #pragma omp parallel for
     for (int i = 0; i < Nf; ++i) {
         Eigen::MatrixXd Xi(dim_x, Tf + 1);
@@ -268,21 +289,23 @@ void BiMPPI::forwardRollout() {
         double cost = 0.0;
         for (int j = 0; j < Tf; ++j) {
             cost += p(Xi.col(j), x_target);
-            // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
             Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
         }
         cost += p(Xi.col(Tf), x_target);
         for (int j = 0; j <= Tf; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
+                all_feasible = false;
                 cost = 1e8;
                 break;
             }
         }
-
         costs(i) = cost;
         Di(i) = Xi.row(dim_x - 1).mean();
     }
-    dbscan(clusters_f, Di, costs, Nf, Tf);
+
+    if (!all_feasible) {dbscan(clusters_f, Di, costs, Nf, Tf);}
+    else {clusters_f.clear();}
+
     if (clusters_f.empty()) {clusters_f.push_back(full_cluster_f);}
     calculateU(Uf, clusters_f, costs, Ui, Tf);
 
@@ -343,7 +366,7 @@ void BiMPPI::guideMPPI() {
     Cr.clear();
     Xr.clear();
     
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int r = 0; r < joints.size(); ++r) {
         Eigen::MatrixXd Ui = Uc[r].replicate(Nr, 1);
         Eigen::MatrixXd X_ref = Xc[r];
@@ -364,13 +387,16 @@ void BiMPPI::guideMPPI() {
                 // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
                 cost += p(Xi.col(j), x_target);
                 Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
-                if (collision_checker->getCollisionGrid(Xi.col(j))) {
-                    cost = 1e8;
-                }
             }
             // Guide Cost
             cost = p(Xi.col(Tr), x_target);
             cost += (Xi - X_ref).colwise().norm().sum();
+            for (int j = 0; j < Tr + 1; ++j) {
+                if (collision_checker->getCollisionGrid(Xi.col(j))) {
+                    cost = 1e8;
+                    break;
+                }
+            }
             costs(i) = cost;
         }
         double min_cost = costs.minCoeff();
@@ -389,16 +415,17 @@ void BiMPPI::guideMPPI() {
         Xi.col(0) = x_init;
         double cost = 0.0;
         for (int j = 0; j < Tr; ++j) {
+            cost += p(Xi.col(j), x_target);
+            // cost += q(Xi.col(j), Ures.col(j));
+            Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ures.col(j)));
+        }
+        cost += p(Xi.col(Tr), x_target);
+        for (int j = 0; j < Tr + 1; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 cost = 1e8;
                 break;
             }
-            else {
-                cost += q(Xi.col(j), Ures.col(j));
-                Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ures.col(j)));
-            }
         }
-        cost += p(Xi.col(Tr), x_target);
 
         Ur.push_back(Ures);
         Cr.push_back(cost);
@@ -422,13 +449,9 @@ void BiMPPI::guideMPPI() {
 void BiMPPI::partitioningControl() {
     int T = Uo.cols();
     int n = std::ceil(psi * (T-1));
-    U_f0 = Uo.middleCols(1,std::min(n,T-2));
-    U_b0 = Uo.rightCols(std::min(n,T-1));
-    // U_f0 = Uo.middleCols(1,n);
-    // U_b0 = Uo.rightCols(n);
 
-    Tf = U_f0.cols();
-    Tb = U_b0.cols();
+    U_f0 = Uo.leftCols(std::min(n,T-1));
+    U_b0 = Uo.rightCols(std::min(n,T-1));
 }
 
 void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {

@@ -19,6 +19,8 @@ set(COMMON_SOURCES
     src/bi_mppi.cpp
     src/mppi.cpp
     src/log_mppi.cpp
+    src/global.cpp
+    src/glob.cpp
 )
 
 foreach(SRC ${COMMON_SOURCES})

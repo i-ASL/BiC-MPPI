@@ -36,7 +36,9 @@ WMRobotMap::WMRobotMap() {
 
     h = [&](Eigen::Ref<Eigen::MatrixXd> U) -> void {
         U.row(0) = U.row(0).cwiseMax(velocity).cwiseMin(velocity);
-        U.row(1) = U.row(1).cwiseMax(-0.5).cwiseMin(0.5);
+        // U.row(0) = U.row(0).cwiseMax(0.0).cwiseMin(1.0);
+        // U.row(1) = U.row(1).cwiseMax(-0.5).cwiseMin(0.5);
+        U.row(1) = U.row(1).cwiseMax(-M_PI_4).cwiseMin(M_PI_4);
         return;
     };
 }
