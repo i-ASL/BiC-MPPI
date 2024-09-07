@@ -29,17 +29,17 @@ int main() {
     // for (int map = 299; map >= 0 ; --map) {
     // for (int map = 276; map >= 0; --map) {
     // for (int s = 1; s < 2; ++s) {
-    for (int s = 0; s < 3; ++s) {
+    for (int s = 0; s < 2; ++s) {
         switch (s)
         {
         case 0:
-            param.x_init(0) = 1.5;
-            break;
-        case 1:
             param.x_init(0) = 0.5;
             break;
-        case 2:
+        case 1:
             param.x_init(0) = 2.5;
+            break;
+        case 2:
+            param.x_init(0) = 1.5;
             break;
         default:
             break;
