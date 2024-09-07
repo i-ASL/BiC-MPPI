@@ -24,20 +24,20 @@ int main() {
     param.Nr = 3000;
     param.gamma_u = 10.0;
     Eigen::VectorXd sigma_u(model.dim_u);
-    sigma_u << 0.0, 0.3;
+    sigma_u << 0.5, 0.8;
     param.sigma_u = sigma_u.asDiagonal();
     param.deviation_mu = 1.0;
     param.cost_mu = 1.0;
-    param.minpts = 5;
+    param.minpts = 3;
     param.epsilon = 0.01;
-    param.psi = 0.8;
+    param.psi = 0.5;
 
     int maxiter = 500;
 
     // for (int map = 299; map >= 0 ; --map) {
     // for (int map = 276; map >= 0; --map) {
-    for (int s = 2; s < 3; ++s) {
-    // for (int s = 1; s < 2; ++s) {
+    // for (int s = 2; s < 3; ++s) {
+    for (int s = 1; s < 2; ++s) {
         switch (s)
         {
         case 0:
@@ -52,7 +52,8 @@ int main() {
         default:
             break;
         }
-        for (int map = 299; map >= 0; --map) {
+        for (int map = 298; map >= 0; --map) {
+        // for (int map = 299; map >= 0; --map) {
         // for (int map = 0; map < 300; ++map) {
             CollisionChecker collision_checker = CollisionChecker();
             collision_checker.loadMap("../BARN_dataset/txt_files/output_"+std::to_string(map)+".txt", 0.1);

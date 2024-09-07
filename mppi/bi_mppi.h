@@ -34,7 +34,8 @@ public:
     void guideMPPI();
     void partitioningControl();
 
-    void dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T);
+    void dbscan(std::vector<std::vector<int>> &clusters, const Eigen::MatrixXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T);
+    // void dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T);
     void calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &costs, const Eigen::MatrixXd &Ui, const int &T);
     void show();
     void showTraj();
@@ -187,6 +188,7 @@ void BiMPPI::solve() {
     // elapsed_1 = finish - start;
     // std::cout<<"Fir = "<<elapsed_1.count()<<std::endl;
 
+    std::cout<<"a"<<std::endl;
     start = std::chrono::high_resolution_clock::now();
     backwardRollout();
     forwardRollout();
@@ -194,9 +196,11 @@ void BiMPPI::solve() {
     elapsed_1 = finish - start;
     // std::cout<<"Sec = "<<elapsed_1.count()<<std::endl;
 
+    std::cout<<"b"<<std::endl;
     // 2. Select Connection
     start = std::chrono::high_resolution_clock::now();
     selectConnection();
+    std::cout<<"c"<<std::endl;
     concatenate();
     finish = std::chrono::high_resolution_clock::now();
     elapsed_2 = finish - start;
@@ -206,6 +210,7 @@ void BiMPPI::solve() {
     guideMPPI();
     finish = std::chrono::high_resolution_clock::now();
     elapsed_3 = finish - start;
+    std::cout<<"d"<<std::endl;
 
     // 4. Partitioning Control
     start = std::chrono::high_resolution_clock::now();
@@ -220,7 +225,8 @@ void BiMPPI::solve() {
 
 void BiMPPI::backwardRollout() {
     Eigen::MatrixXd Ui = U_b0.replicate(Nb, 1);
-    Eigen::VectorXd Di(Nb);
+    Eigen::MatrixXd Di(dim_u, Nb);
+    // Eigen::VectorXd Di(Nf);
     Eigen::VectorXd costs(Nb);
     bool all_feasible = true;
     #pragma omp parallel for
@@ -242,15 +248,15 @@ void BiMPPI::backwardRollout() {
             cost += p(Xi.col(j), x_init);
         }
         cost += p(Xi.col(0), x_init);
-        for (int j = 0; j <= Tb; ++j) {
+        for (int j = Tb; j >= 0; --j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
-                cost = 1e8;
                 all_feasible = false;
+                cost = 1e8;
                 break;
             }
         }
         costs(i) = cost;
-        Di(i) = Xi.row(dim_x - 1).mean();
+        Di.col(i) = (Ui.middleRows(i * dim_u, dim_u) - U_b0).rowwise().mean();
     }
 
     if (!all_feasible) {dbscan(clusters_b, Di, costs, Nb, Tb);}
@@ -275,7 +281,8 @@ void BiMPPI::backwardRollout() {
 
 void BiMPPI::forwardRollout() {
     Eigen::MatrixXd Ui = U_f0.replicate(Nf, 1);
-    Eigen::VectorXd Di(Nf);
+    Eigen::MatrixXd Di(dim_u, Nf);
+    // Eigen::VectorXd Di(Nf);
     Eigen::VectorXd costs(Nf);
     bool all_feasible = true;
     #pragma omp parallel for
@@ -296,11 +303,12 @@ void BiMPPI::forwardRollout() {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 all_feasible = false;
                 cost = 1e8;
+                // std::cout<<"F = "<<cost<<std::endl;
                 break;
             }
         }
         costs(i) = cost;
-        Di(i) = Xi.row(dim_x - 1).mean();
+        Di.col(i) = (Ui.middleRows(i * dim_u, dim_u) - U_f0).rowwise().mean();
     }
 
     if (!all_feasible) {dbscan(clusters_f, Di, costs, Nf, Tf);}
@@ -324,7 +332,7 @@ void BiMPPI::selectConnection() {
         double min_norm = std::numeric_limits<double>::max();
         int cb, df, db;
         for (int cb_ = 0; cb_ < clusters_b.size(); ++cb_) {
-            for (int df_ = 1; df_ < Tf; ++df_) {
+            for (int df_ = 1; df_ < Tf-1; ++df_) {
                 for (int db_ = 0; db_ < Tb-1; ++db_) {
                     double norm = (Xf.block(cf * dim_x, df_, dim_x, 1) - Xb.block(cb_ * dim_x, db_, dim_x, 1)).norm();
                     if (norm < min_norm) {
@@ -336,6 +344,7 @@ void BiMPPI::selectConnection() {
                 }
             }
         }
+        // std::cout << "F: " << clusters_b.size() << ", B: " << clusters_b.size() << ", cf: " << cf << ", cb: " << cb << ", df: " << df << ", db: " << db << std::endl;
         joints.push_back({cf, cb, df, db});
     }
 }
@@ -349,6 +358,7 @@ void BiMPPI::concatenate() {
         int cb = joint[1];
         int df = joint[2];
         int db = joint[3];
+        // std::cout << "F: " << clusters_b.size() << ", B: " << clusters_b.size() << ", cf: " << cf << ", cb: " << cb << ", df: " << df << ", db: " << db << std::endl;
 
         Eigen::MatrixXd U(dim_u, df + (Tb - db) + 1);
         Eigen::MatrixXd X(dim_x, df + (Tb - db) + 2);
@@ -451,10 +461,12 @@ void BiMPPI::partitioningControl() {
     int n = std::ceil(psi * (T-1));
 
     U_f0 = Uo.leftCols(std::min(n,T-1));
+    // U_b0 = Eigen::MatrixXd::Zero(dim_u, std::min(n,T-1));
     U_b0 = Uo.rightCols(std::min(n,T-1));
 }
 
-void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
+void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::MatrixXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
+// void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
     clusters.clear();
     std::vector<bool> core_points(N, false);
     std::map<int, std::vector<int>> core_tree;
@@ -464,7 +476,9 @@ void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::Vector
         if (costs(i) > 1E7) {continue;}
         for (int j = i + 1; j < N; ++j) {
             if (costs(j) > 1E7) {continue;}
-            if (deviation_mu * std::abs(Di(i) - Di(j)) < epsilon) {
+            // std::cout<<(Di.col(i) - Di.col(j)).norm()<<std::endl;
+            if (deviation_mu * (Di.col(i) - Di.col(j)).norm() < epsilon) {
+            // if (deviation_mu * std::abs(Di(i) - Di(j)) < epsilon) {
                 #pragma omp critical
                 {
                 core_tree[i].push_back(j);
@@ -525,7 +539,7 @@ void BiMPPI::calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> 
     }
 }
 
-void BiMPPI::show() {
+void BiMPPI:: show() {
     namespace plt = matplotlibcpp;
     // plt::subplot(1,2,1);
 
@@ -584,28 +598,28 @@ void BiMPPI::show() {
     //     }
     // }
 
-    // for (int index = 0; index < clusters_f.size(); ++index) {
-    //     std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tf));
-    //     for (int i = 0; i < dim_x; ++i) {
-    //         for (int j = 0; j < Tf + 1; ++j) {
-    //             X_MPPI[i][j] = Xf(index * dim_x + i, j);
-    //         }
-    //     }
-    //     std::string color = "C" + std::to_string(index%10);
-    //     plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
-    // }
+    for (int index = 0; index < clusters_f.size(); ++index) {
+        std::vector<std::vector<double>> F_BRANCH(dim_x, std::vector<double>(Tf+1));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tf + 1; ++j) {
+                F_BRANCH[i][j] = Xf(index * dim_x + i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(index%10);
+        plt::plot(F_BRANCH[0], F_BRANCH[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
 
-    // for (int index = 0; index < clusters_b.size(); ++index) {
-    //     std::vector<std::vector<double>> X_MPPI(dim_x, std::vector<double>(Tb));
-    //     for (int i = 0; i < dim_x; ++i) {
-    //         for (int j = 0; j < Tb + 1; ++j) {
-    //             X_MPPI[i][j] = Xb(index * dim_x + i, j);
-    //         }
-    //     }
-    //     std::string color = "C" + std::to_string(index%10);
-    //     plt::plot(X_MPPI[0], X_MPPI[1], {{"color", color}, {"linewidth", "10.0"}});
-    // }
-
+    for (int index = 0; index < clusters_b.size(); ++index) {
+        std::vector<std::vector<double>> B_BRANCH(dim_x, std::vector<double>(Tb+1));
+        for (int i = 0; i < dim_x; ++i) {
+            for (int j = 0; j < Tb + 1; ++j) {
+                B_BRANCH[i][j] = Xb(index * dim_x + i, j);
+            }
+        }
+        std::string color = "C" + std::to_string(index%10);
+        plt::plot(B_BRANCH[0], B_BRANCH[1], {{"color", color}, {"linewidth", "10.0"}});
+    }
+    
     // // plt::xlim(0, 3);
     // // plt::ylim(0, 5);
     // // plt::grid(true);
