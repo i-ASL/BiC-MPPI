@@ -33,10 +33,10 @@ int main() {
         switch (s)
         {
         case 0:
-            param.x_init(0) = 0.5;
+            param.x_init(0) = 1.5;
             break;
         case 1:
-            param.x_init(0) = 1.5;
+            param.x_init(0) = 0.5;
             break;
         case 2:
             param.x_init(0) = 2.5;
