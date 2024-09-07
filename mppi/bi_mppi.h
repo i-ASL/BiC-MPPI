@@ -165,7 +165,8 @@ Eigen::MatrixXd BiMPPI::getNoise(const int &T) {
 
 void BiMPPI::move() {
     x_init = x_init + (dt * f(x_init, u0));
-    U_f0 = U_f0.rightCols(U_f0.cols() - 1);
+    U_f0.leftCols(U_f0.cols() - 1) = U_f0.rightCols(U_f0.cols() - 1);
+    // U_f0 = U_f0.rightCols(U_f0.cols() - 1);
 }
 
 void BiMPPI::solve() {
@@ -173,22 +174,8 @@ void BiMPPI::solve() {
     omp_set_nested(1);
     
     // 1. Clustered MPPI
-    Tf = U_f0.cols();
-    Tb = U_b0.cols();
-    // start = std::chrono::high_resolution_clock::now();
-    // #pragma omp parallel sections num_threads(12)
-    // {
-    //     #pragma omp section
-    //     backwardRollout();
-
-    //     #pragma omp section
-    //     forwardRollout();
-    // }
-    // finish = std::chrono::high_resolution_clock::now();
-    // elapsed_1 = finish - start;
-    // std::cout<<"Fir = "<<elapsed_1.count()<<std::endl;
-
-    std::cout<<"a"<<std::endl;
+    // Tf = U_f0.cols();
+    // Tb = U_b0.cols();
     start = std::chrono::high_resolution_clock::now();
     backwardRollout();
     forwardRollout();
@@ -196,11 +183,9 @@ void BiMPPI::solve() {
     elapsed_1 = finish - start;
     // std::cout<<"Sec = "<<elapsed_1.count()<<std::endl;
 
-    std::cout<<"b"<<std::endl;
     // 2. Select Connection
     start = std::chrono::high_resolution_clock::now();
     selectConnection();
-    std::cout<<"c"<<std::endl;
     concatenate();
     finish = std::chrono::high_resolution_clock::now();
     elapsed_2 = finish - start;
@@ -210,13 +195,9 @@ void BiMPPI::solve() {
     guideMPPI();
     finish = std::chrono::high_resolution_clock::now();
     elapsed_3 = finish - start;
-    std::cout<<"d"<<std::endl;
 
     // 4. Partitioning Control
-    start = std::chrono::high_resolution_clock::now();
     partitioningControl();
-    finish = std::chrono::high_resolution_clock::now();
-    elapsed_4 = finish - start;
 
     elapsed = elapsed_1.count() + elapsed_2.count() + elapsed_3.count();
 
@@ -303,7 +284,6 @@ void BiMPPI::forwardRollout() {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {
                 all_feasible = false;
                 cost = 1e8;
-                // std::cout<<"F = "<<cost<<std::endl;
                 break;
             }
         }
@@ -332,8 +312,8 @@ void BiMPPI::selectConnection() {
         double min_norm = std::numeric_limits<double>::max();
         int cb, df, db;
         for (int cb_ = 0; cb_ < clusters_b.size(); ++cb_) {
-            for (int df_ = 1; df_ < Tf-1; ++df_) {
-                for (int db_ = 0; db_ < Tb-1; ++db_) {
+            for (int df_ = 0; df_ <= Tf; ++df_) {
+                for (int db_ = 0; db_ <= Tb; ++db_) {
                     double norm = (Xf.block(cf * dim_x, df_, dim_x, 1) - Xb.block(cb_ * dim_x, db_, dim_x, 1)).norm();
                     if (norm < min_norm) {
                         min_norm = norm;
@@ -344,7 +324,6 @@ void BiMPPI::selectConnection() {
                 }
             }
         }
-        // std::cout << "F: " << clusters_b.size() << ", B: " << clusters_b.size() << ", cf: " << cf << ", cb: " << cb << ", df: " << df << ", db: " << db << std::endl;
         joints.push_back({cf, cb, df, db});
     }
 }
@@ -358,13 +337,28 @@ void BiMPPI::concatenate() {
         int cb = joint[1];
         int df = joint[2];
         int db = joint[3];
-        // std::cout << "F: " << clusters_b.size() << ", B: " << clusters_b.size() << ", cf: " << cf << ", cb: " << cb << ", df: " << df << ", db: " << db << std::endl;
 
-        Eigen::MatrixXd U(dim_u, df + (Tb - db) + 1);
-        Eigen::MatrixXd X(dim_x, df + (Tb - db) + 2);
+        Eigen::MatrixXd U(dim_u, std::max(Tf, df + (Tb - db)));
+        Eigen::MatrixXd X(dim_x, std::max(Tf, df + (Tb - db)) + 1);
 
-        U << Uf.block(cf * dim_u, 0, dim_u, df+1), Ub.block(cb * dim_u, db, dim_u, Tb - db);
-        X << Xf.block(cf * dim_x, 0, dim_x, df+1), Xb.block(cb * dim_x, db, dim_x, Tb - db + 1);
+        if (df == 0) {
+            X.leftCols(df+1) = Xf.block(cf * dim_x, 0, dim_x, df+1);
+        }
+        else {
+            U.leftCols(df) =  Uf.block(cf * dim_u, 0, dim_u, df);
+            X.leftCols(df+1) = Xf.block(cf * dim_x, 0, dim_x, df+1);
+        }
+
+        if (db != Tb) {
+            U.middleCols(df+1, Tb - db - 1) = Ub.block(cb * dim_u, db + 1, dim_u, Tb - db - 1);
+            X.middleCols(df+2, Tb - db - 1) = Xb.block(cb * dim_x, db + 1, dim_x, Tb - db - 1);
+        }
+
+        // Fill if lenght is shorter than Tf
+        if (df + (Tb - db) < Tf) {
+            U.rightCols(Tf - (df + (Tb - db))).colwise() = Eigen::VectorXd::Zero(dim_u);
+            X.rightCols(Tf - (df + (Tb - db))).colwise() = x_target;
+        }
 
         Uc.push_back(U);
         Xc.push_back(X);
@@ -394,12 +388,11 @@ void BiMPPI::guideMPPI() {
             Xi.col(0) = x_init;
             double cost = 0.0;
             for (int j = 0; j < Tr; ++j) {
-                // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
                 cost += p(Xi.col(j), x_target);
                 Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
             }
-            // Guide Cost
             cost = p(Xi.col(Tr), x_target);
+            // Guide Cost
             cost += (Xi - X_ref).colwise().norm().sum();
             for (int j = 0; j < Tr + 1; ++j) {
                 if (collision_checker->getCollisionGrid(Xi.col(j))) {
@@ -426,7 +419,6 @@ void BiMPPI::guideMPPI() {
         double cost = 0.0;
         for (int j = 0; j < Tr; ++j) {
             cost += p(Xi.col(j), x_target);
-            // cost += q(Xi.col(j), Ures.col(j));
             Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ures.col(j)));
         }
         cost += p(Xi.col(Tr), x_target);
@@ -457,16 +449,11 @@ void BiMPPI::guideMPPI() {
 }
 
 void BiMPPI::partitioningControl() {
-    int T = Uo.cols();
-    int n = std::ceil(psi * (T-1));
-
-    U_f0 = Uo.leftCols(std::min(n,T-1));
-    // U_b0 = Eigen::MatrixXd::Zero(dim_u, std::min(n,T-1));
-    U_b0 = Uo.rightCols(std::min(n,T-1));
+    U_f0 = Uo.leftCols(Tf);
+    U_b0 = Eigen::MatrixXd::Zero(dim_u, Tb);
 }
 
 void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::MatrixXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
-// void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::VectorXd &Di, const Eigen::VectorXd &costs, const int &N, const int &T) {
     clusters.clear();
     std::vector<bool> core_points(N, false);
     std::map<int, std::vector<int>> core_tree;
@@ -476,9 +463,7 @@ void BiMPPI::dbscan(std::vector<std::vector<int>> &clusters, const Eigen::Matrix
         if (costs(i) > 1E7) {continue;}
         for (int j = i + 1; j < N; ++j) {
             if (costs(j) > 1E7) {continue;}
-            // std::cout<<(Di.col(i) - Di.col(j)).norm()<<std::endl;
             if (deviation_mu * (Di.col(i) - Di.col(j)).norm() < epsilon) {
-            // if (deviation_mu * std::abs(Di(i) - Di(j)) < epsilon) {
                 #pragma omp critical
                 {
                 core_tree[i].push_back(j);
@@ -536,10 +521,11 @@ void BiMPPI::calculateU(Eigen::MatrixXd &U, const std::vector<std::vector<int>> 
         for (size_t i = 0; i < pts; ++i) {
             U.middleRows(index * dim_u, dim_u) += (weights[i] / total_weight) * Ui.middleRows(clusters[index][i] * dim_u, dim_u);
         }
+        h(U.middleRows(index * dim_u, dim_u));
     }
 }
 
-void BiMPPI:: show() {
+void BiMPPI::show() {
     namespace plt = matplotlibcpp;
     // plt::subplot(1,2,1);
 
