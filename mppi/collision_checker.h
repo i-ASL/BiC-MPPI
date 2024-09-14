@@ -14,6 +14,7 @@ public:
     ~CollisionChecker();
 
     void loadMap(const std::string& file_path, double resolution);
+    void set3D(double max_hei);
 
     // x, y, r, r^2
     std::vector<std::array<double, 4>> circles;
@@ -32,6 +33,8 @@ public:
 
     std::vector<std::vector<double>> map;
 private:
+    bool is_3d;
+    int max_hei;
     bool with_map;
     double resolution;
     int max_row;
@@ -42,6 +45,7 @@ CollisionChecker::CollisionChecker() {
     circles.clear();
     rectangles.clear();
     with_map = false;
+    is_3d = false;
 }
 
 CollisionChecker::~CollisionChecker() {
@@ -75,6 +79,11 @@ void CollisionChecker::loadMap(const std::string& file_path, double resolution) 
     this->resolution = resolution;
     max_row = map.size();
     max_col = map[0].size();
+}
+
+void CollisionChecker::set3D(double max_hei) {
+    this->is_3d = true;
+    this->max_hei = max_hei/resolution;
 }
 
 void CollisionChecker::addCircle(double x, double y, double r) {
@@ -148,10 +157,13 @@ bool CollisionChecker::getCollisionGrid_map(const Eigen::VectorXd &x) {
     // Need to check comparison double
     int nx = round(x(0)/resolution);
     int ny = round(x(1)/resolution);
-    if (nx < 0 || max_row <= nx) {return false;}
-    if (nx < 0 || max_col <= ny) {return false;}
+    if (nx < 0 || max_row <= nx) {return true;}
+    if (ny < 0 || max_col <= ny) {return false;}
+    if (is_3d) {
+        int nz = round(x(2)/resolution);
+        if (nz < 0 || max_hei <= nz) {return false;}
+    }
     if (map[nx][ny] == 10) {return true;}
-    // if (map[nx][ny] < 0.8) {return true;}
     return false;
 }
 

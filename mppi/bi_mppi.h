@@ -54,6 +54,7 @@ public:
 
     Eigen::VectorXd x_init;
     Eigen::VectorXd x_target;
+    Eigen::VectorXd dummy_u;
 
     Eigen::MatrixXd Uo;
     Eigen::MatrixXd Xo;
@@ -153,6 +154,7 @@ void BiMPPI::init(BiMPPIParam bi_mppi_param) {
     std::iota(full_cluster_b.begin(), full_cluster_b.end(), 0);
 
     u0 = Eigen::VectorXd::Zero(dim_u);
+    dummy_u = Eigen::VectorXd::Zero(dim_u);
 }
 
 void BiMPPI::setCollisionChecker(CollisionChecker *collision_checker) {
@@ -356,7 +358,7 @@ void BiMPPI::concatenate() {
 
         // Fill if lenght is shorter than Tf
         if (df + (Tb - db) < Tf) {
-            U.rightCols(Tf - (df + (Tb - db))).colwise() = Eigen::VectorXd::Zero(dim_u);
+            U.rightCols(Tf - (df + (Tb - db))).colwise() = dummy_u;
             X.rightCols(Tf - (df + (Tb - db))).colwise() = x_target;
         }
 

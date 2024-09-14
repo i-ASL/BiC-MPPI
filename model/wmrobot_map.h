@@ -6,8 +6,6 @@ class WMRobotMap : public ModelBase {
 public:
     WMRobotMap();
     ~WMRobotMap();
-
-    const double velocity = 0.5;
 };
 
 WMRobotMap::WMRobotMap() {

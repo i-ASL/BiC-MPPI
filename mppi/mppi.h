@@ -130,6 +130,7 @@ void MPPI::solve() {
             // cost += q(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1));
             Xi.col(j+1) = Xi.col(j) + (dt * f(Xi.col(j), Ui.block(i * dim_u, j, dim_u, 1)));
         }
+
         cost += p(Xi.col(T), x_target);
         for (int j = 1; j < T+1; ++j) {
             if (collision_checker->getCollisionGrid(Xi.col(j))) {

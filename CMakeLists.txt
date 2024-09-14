@@ -15,12 +15,22 @@ include_directories(
     ${PYTHON_INCLUDE_DIRS}
 )
 
-set(COMMON_SOURCES
-    src/bi_mppi.cpp
-    src/mppi.cpp
-    src/log_mppi.cpp
-    src/cluster_mppi.cpp
-)
+if (quadrotor) 
+    set(COMMON_SOURCES
+        src/quadrotor/bi_mppi.cpp
+        src/quadrotor/mppi.cpp
+        src/quadrotor/log_mppi.cpp
+        src/quadrotor/cluster_mppi.cpp
+    )
+else()
+    set(COMMON_SOURCES
+        src/wmrobot/bi_mppi.cpp
+        src/wmrobot/mppi.cpp
+        src/wmrobot/log_mppi.cpp
+        src/wmrobot/cluster_mppi.cpp
+    )
+endif()
+
 
 foreach(SRC ${COMMON_SOURCES})
     get_filename_component(EXE_NAME ${SRC} NAME_WE)
