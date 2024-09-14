@@ -2,6 +2,5 @@
 build/
 eigen/
 matplotlibcpp/
-autodiff/
 EigenRand/
 BARN_dataset/txt_files
