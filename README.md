@@ -2,7 +2,12 @@
 
 Implementation of the BiC-MPPI (Bidirectional Clustering Model Predictive Path Integral) in C++.
 
-![scheme](doc/bi_mppi_flow_scheme.png)
+<video controls>
+  <source src="doc/Bi_MPPI_Video_Test_comp.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+![scheme](doc/scheme_white.png)
 
 
 ## Preparation
@@ -34,6 +39,7 @@ Map modification in the BARN dataset with extended boundaries and inflated obsta
 cd BiC-MPPI
 mkdir build && cd build
 cmake.. -Dquadrotor=1 && make
+./bi_mppi   # or other variants (mppi, log_mppi, cluster_mppi)
 ```
 |                  |  Native  | Log-MPPI | Cluster-MPPI | BiC-MPPI (ours) |
 |:----------------:|:--------:|:--------:|:------------:|:---------------:|
@@ -53,6 +59,7 @@ Q1, Q2, Q3 represent the quantiles of error (x, y), respectively.
 cd BiC-MPPI
 mkdir build && cd build
 cmake.. -Dquadrotor=0 && make
+./bi_mppi   # or other variants (mppi, log_mppi, cluster_mppi)
 ```
 |                  | MPPI          | Log-MPPI      | Cluster-MPPI | BiC-MPPI (ours) |
 |:----------------:|:--------:|:--------:|:------------:|:---------------:|
