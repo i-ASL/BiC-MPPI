@@ -2,11 +2,6 @@
 
 Implementation of the BiC-MPPI (Bidirectional Clustering Model Predictive Path Integral) in C++.
 
-<video controls>
-  <source src="doc/Bi_MPPI_Video_Test_comp.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
-
 ![scheme](doc/scheme_white.png)
 
 
