@@ -5,12 +5,13 @@ Implementation of the BiC-MPPI in C++.
 ## Preparation
 
 ### Dependancy
-**EigenRand** needs to be named as in CMakeLists.txt.
+**EigenRand** needs to be named as same as in CMakeLists.txt.
 - [Eigen 3.3.9](https://gitlab.com/libeigen/eigen/-/releases/3.3.9)
 - [EigenRand](https://github.com/bab2min/EigenRand)
 - [OpenMP](https://www.openmp.org/)
 
 ### Map Download and Modification
+![MPPI](doc/barn_mod.png)
 ```bash
 git clone https://github.com/i-ASL/BiC-MPPI.git
 cd BiC-MPPI
