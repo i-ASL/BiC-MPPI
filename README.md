@@ -1,6 +1,9 @@
 # BiC-MPPI
 
-Implementation of the BiC-MPPI in C++.
+Implementation of the BiC-MPPI (Bidirectional Clustering Model Predictive Path Integral) in C++.
+
+![scheme](doc/bi_mppi_flow_scheme.png)
+
 
 ## Preparation
 
