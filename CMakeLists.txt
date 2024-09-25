@@ -11,7 +11,7 @@ include_directories(
 
     EigenRand/
     ${EIGEN3_INCLUDE_DIRS}
-    matplotlibcpp/
+    # matplotlibcpp/
     ${PYTHON_INCLUDE_DIRS}
 )
 
